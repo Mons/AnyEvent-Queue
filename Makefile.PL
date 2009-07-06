@@ -13,6 +13,7 @@ requires 'Object::Event';
 requires 'constant::def';
 requires 'JSON::XS';
 requires 'YAML::Syck';
+requires 'Queue::PQ';
 
 auto_install;
 

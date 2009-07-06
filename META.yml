@@ -3,12 +3,13 @@ abstract: 'Bundle of queue tools'
 author:
   - 'Mons Anderson <mons@cpan.org>'
 build_requires:
+  ExtUtils::MakeMaker: 6.42
   Test::More: 0
   ex::lib: 0
 configure_requires:
-  ExtUtils::MakeMaker: 6.50
+  ExtUtils::MakeMaker: 6.42
 distribution_type: module
-generated_by: 'Module::Install version 0.81'
+generated_by: 'Module::Install version 0.90'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
