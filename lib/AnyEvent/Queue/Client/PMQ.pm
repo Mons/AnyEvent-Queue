@@ -161,7 +161,7 @@ sub _release { shift->_give_back('release', @_) }
 sub _ack     { shift->_give_back('ack',     @_) }
 sub _bury    { shift->_give_back('bury',    @_) }
 
-sub _delete : method  { shift->_give_back('dlete',   @_) }
+sub _delete  { shift->_give_back('delete',   @_) }
 
 sub _stats {
 	my $self = shift;
