@@ -1,0 +1,29 @@
+---
+abstract: 'Bundle of queue tools'
+author:
+  - 'Mons Anderson <mons@cpan.org>'
+build_requires:
+  Test::More: 0
+  ex::lib: 0
+configure_requires:
+  ExtUtils::MakeMaker: 6.50
+distribution_type: module
+generated_by: 'Module::Install version 0.81'
+license: perl
+meta-spec:
+  url: http://module-build.sourceforge.net/META-spec-v1.4.html
+  version: 1.4
+name: AnyEvent-Queue
+no_index:
+  directory:
+    - inc
+    - t
+requires:
+  AnyEvent: 0
+  JSON::XS: 0
+  Object::Event: 0
+  YAML::Syck: 0
+  constant::def: 0
+resources:
+  license: http://dev.perl.org/licenses/
+version: 0.01
