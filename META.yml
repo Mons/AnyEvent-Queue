@@ -23,6 +23,7 @@ requires:
   AnyEvent: 0
   JSON::XS: 0
   Object::Event: 0
+  Queue::PQ: 0
   YAML::Syck: 0
   constant::def: 0
 resources:
