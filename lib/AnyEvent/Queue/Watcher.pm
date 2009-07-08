@@ -42,7 +42,7 @@ sub new {
 sub stop {
 	my $self = shift;
 	my %args = @_;
-	$self->{stopping} = $args{cb} or warn "cb required";
+	$self->{stopping} = $args{cb} or croak "cb required";
 }
 
 sub rps {
@@ -97,8 +97,8 @@ sub rps {
 sub taken_cb {
 	my $self = shift;
 	my $job = shift;
-	#warn "taken: cf = $self->{curfetch}, taking = $self->{taking}, taken = $self->{taken}{count}";
 	$self->{taking}--;
+	#warn "taken: cf = $self->{curfetch}, taking = $self->{taking}, taken = $self->{taken}{count}";
 	if ($job) {
 		$self->{nomore} = 0;
 		push @{ $self->{rps}{_} },time;
@@ -130,6 +130,7 @@ sub taken_cb {
 
 sub _run {
 	my $self = shift;
+	#warn "_run ($self->{taken}{count})";
 	if ($self->{stopping}) {
 		if (!$self->{taking} and !$self->{taken}{count}) {
 			$self->{stopped} = 1;
@@ -180,14 +181,18 @@ sub run {
 
 sub maybe_take {
 	my $self = shift;
-	return $self->{taking}-- if $self->{taking} + $self->{taken}{count} >= $self->{curfetch} or $self->{stopping};
+	#warn "maybe take ($self->{taking} + $self->{taken}{count} > $self->{curfetch})";
+	return $self->{taking}--, $self->_run if $self->{stopping};
+	return $self->{taking}-- if $self->{taking} + $self->{taken}{count} > $self->{curfetch};
+	#warn "maybe take ($self->{taking} + $self->{taken}{count} > $self->{curfetch}) do";
 	$self->{client}->take( src => $self->{source}, cb => sub { $self->taken_cb(@_) } );
 }
 
 sub next_take {
 	my $self = shift;
 	$self->{taken}{count}--;
-	return if $self->{stopping};
+	#warn "next take ($self->{taken}{count})";
+	return $self->_run if $self->{stopping};
 	if ($self->{rate}) {
 		# TODO: rate limit
 		my ($rps,$wait) = $self->rps($self->{curfetch});
