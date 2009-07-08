@@ -6,6 +6,7 @@ use Data::Dumper;
 use base 'AnyEvent::Queue::Client';
 
 use AnyEvent::Queue::Encoder::YAML;
+use bytes ();
 our $yaml;
 BEGIN { $yaml = AnyEvent::Queue::Encoder::YAML->new; }
 
@@ -59,22 +60,40 @@ sub _add {
 	my $pri = $args{pri};
 	$pri = 0 if $cmd eq 'push';
 	my $ttr = $args{ttr};
-	
-	$self->__use( $dst, sub {
-		shift or return $args{cb}->(undef,@_);
-		$self->__put($data,$pri,$delay,$ttr,sub {
-			my $action = shift or return $args{cb}->(undef,@_);
-			warn "Job was buried" if $action =~ /buried/;
-			my $id = shift;
-			my $job = $self->job({
-				id  => $id,
-				pri => $pri,
-				src => $dst,
-				data => $data,
+	my $put;$put = sub {
+		undef $put;
+		if ( ( my $sz = bytes::length($data) ) > $self->{max_job_size} ) {
+			return $args{cb}->(undef,"Job too big ($sz), max allowed: $self->{max_job_size}");
+		}
+		$self->__use( $dst, sub {
+			shift or return $args{cb}->(undef,@_);
+			$self->__put($data,$pri,$delay,$ttr,sub {
+				my $action = shift or return $args{cb}->(undef,@_);
+				warn "Job was buried" if $action =~ /buried/;
+				my $id = shift;
+				my $job = $self->job({
+					id  => $id,
+					pri => $pri,
+					src => $dst,
+					data => $data,
+				});
+				$args{cb}->($job);
 			});
-			$args{cb}->($job);
 		});
-	});
+	};
+	unless (defined $self->{max_job_size}) {
+		$self->_stats(cb => sub {
+			if (my $stats = shift) {
+				$self->{max_job_size} = $stats->{'max-job-size'};
+				$put->();
+			} else {
+				undef $put;
+				$args{cb}->(undef,@_);
+			}
+		});
+	} else {
+		$put->();
+	}
 }
 
 sub _recv_job {
@@ -371,9 +390,11 @@ sub __put {
 	$ttr ||= 300;
 	utf8::encode $data if utf8::is_utf8 $data;
 	my $length = bytes::length($data);
+	#warn ">> put $pri $delay $ttr $length  ";
 
 	$self->{con}->command("put $pri $delay $ttr $length$NL$data", cb => sub {
 		local $_ = shift;
+		#warn "<< $_  ";
 		if (/INSERTED (\d+)/) {
 			my $id = $1;
 			$cb->( inserted => $id );
@@ -389,6 +410,7 @@ sub __put {
 			$cb->(undef, 'Newline required after body');
 		}
 		else {
+			#warn ">> put $pri $delay $ttr $length".Dumper("$NL$data")."\n<< $_";
 			$self->__e($cb);
 		}
 	} );
