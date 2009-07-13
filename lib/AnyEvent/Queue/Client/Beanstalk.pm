@@ -37,6 +37,7 @@ sub new {
 	my $self = shift->next::method(@_);
 	$self->{state}{watching} = 1;
 	$self->{state}{watch}{default}++;
+	$self->{state}{use} = 'default';
 	$self;
 }
 
@@ -151,6 +152,20 @@ sub _peek {
 	$self->_recv_job("peek $src $id", $src, @_);
 }
 
+sub _extract_id_cb {
+	my $self = shift;
+	my %args = @_;
+	$args{cb} or return $self->event( error => "no cb at @{[ (caller)[1,2] ]}" );
+	my ($id);
+	if ($args{job}) {
+		$id = $args{job}{id};
+	} else {
+		$id = $args{id};
+	}
+	$id or confess "No id";
+	return ($id,$args{cb});
+}
+
 sub _give_back {
 	my $self = shift;
 	my $cmd = shift;
@@ -170,18 +185,16 @@ sub _give_back {
 	$id or confess "No id for $cmd";
 
 	#warn "Sending request | cb = $args{cb}";
-	warn ">> $cmd $id$args{add}";
 	$self->{con}->command("$cmd $id$args{add}", cb => sub {
 		local $_ = shift;
-		warn "<< $_";
 		if (/^OK\s*$/) {
 			$args{cb}->(1);
 		} else {
+			warn ">> $cmd $id$args{add}\n<< $_ ";
 			local $@ = $_;
 			$args{cb}->(undef, $_);
 		}
 	});
-	
 }
 
 sub _requeue { croak "Not implemented" }
@@ -206,10 +219,14 @@ sub _release {
 	$id or confess "No id for release";
 	$self->__release( $id, $pri, $args{delay}, $args{cb});
 }
-sub _ack     { shift->_give_back('delete',  @_) }
+sub _ack     { shift->_delete(@_) }
 sub _bury    { shift->_give_back('bury',    @_) }
 
-sub _delete  { shift->_give_back('delete',  @_) }
+sub _delete  {
+	my $self = shift;
+	my ($id,$cb) = $self->_extract_id_cb(@_);
+	$self->__delete($id,$cb);
+}
 
 sub _stats {
 	my $self = shift;

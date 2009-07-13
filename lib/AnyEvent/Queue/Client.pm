@@ -168,7 +168,7 @@ sub mk_connection {
 				$self->mk_connection(%args) if $self->{reconnect};
 			},
 		);
-		$self->event( connected => $con );
+		$self->event( connected => $con, "$host:$port" );
 	}, sub { $self->{timeout} };
 	#$cv->recv if $cv;
 }
