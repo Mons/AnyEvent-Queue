@@ -291,6 +291,7 @@ sub _fullstats {
 	@_%2 and confess "Wrong arguments";
 	my %args = @_;
 	$args{cb} or return $self->event( error => "no cb for queues at @{[ (caller)[1,2] ]}" );
+	$self->{con} or return $args{cb}->(undef, "Not connected");
 	$self->_queues(cb => sub {
 		my $qlist = shift;
 		my $cv = AnyEvent->condvar;
@@ -328,6 +329,7 @@ sub _queues {
 	@_%2 and confess "Wrong arguments";
 	my %args = @_;
 	$args{cb} or return $self->event( error => "no cb for queues at @{[ (caller)[1,2] ]}" );
+	$self->{con} or return $args{cb}->(undef, "Not connected");
 	$self->{con}->command("list-tubes", cb => sub {
 		local $_ = shift;
 		if (/^OK\s+(\d+)\s*$/) {

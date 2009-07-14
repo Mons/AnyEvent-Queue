@@ -217,6 +217,12 @@ sub _fullstats {
 					$self->event( error => undef, "Failed to decode data: $@", $data );
 					$args{cb}->(undef, "Failed to decode data: $@",$data);
 				} else {
+					for my $q (values %{ $deco->{queue} }) {
+						if (!defined $q->{total}) {
+							$q->{total} = 0;
+							$q->{total} += $q->{$_} for qw( active buried );
+						}
+					}
 					#warn "Received stats for ".($q ? $q : '<all>').":". Dumper($deco);
 					$args{cb}->($deco);
 				}
