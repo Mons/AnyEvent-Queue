@@ -26,8 +26,9 @@ lib/AnyEvent/Queue/Server/Impl/InMem.pm
 lib/AnyEvent/Queue/Server/PMQ.pm
 lib/AnyEvent/Queue/Server/Proto/PMQ.pm
 lib/AnyEvent/Queue/Watcher.pm
+makeall.sh
 Makefile.PL
-MANIFEST
+MANIFEST			This list of files
 META.yml
 README
 t/00-load.t

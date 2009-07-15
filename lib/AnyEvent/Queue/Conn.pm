@@ -11,6 +11,11 @@ our $QRNL = qr<\015?\012>;
 =head2 EVENTS
 	disconnect
 	error
+
+=head2 METHODS
+
+=over 4
+
 =cut
 
 sub new {
@@ -112,5 +117,9 @@ sub reply {
 	$self->{h}->push_write("@_$NL");
 	warn ">> @_  " if $self->{debug};
 }
+
+=back
+
+=cut
 
 1;
