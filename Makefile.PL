@@ -7,6 +7,7 @@ license  'perl';
 
 build_requires 'Test::More';
 build_requires 'ex::lib';
+tests_recursive;
 
 requires 'AnyEvent';
 requires 'Object::Event';
@@ -14,6 +15,7 @@ requires 'constant::def';
 requires 'JSON::XS';
 requires 'YAML::Syck';
 requires 'Queue::PQ';
+requires 'Compress::Zlib';
 
 auto_install;
 

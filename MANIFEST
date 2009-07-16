@@ -16,6 +16,7 @@ lib/AnyEvent/Queue/Client.pm
 lib/AnyEvent/Queue/Client/Beanstalk.pm
 lib/AnyEvent/Queue/Client/PMQ.pm
 lib/AnyEvent/Queue/Conn.pm
+lib/AnyEvent/Queue/Encoder/Gzip.pm
 lib/AnyEvent/Queue/Encoder/JSON.pm
 lib/AnyEvent/Queue/Encoder/Null.pm
 lib/AnyEvent/Queue/Encoder/Storable.pm
@@ -33,5 +34,6 @@ META.yml
 README
 t/00-load.t
 t/boilerplate.t
+t/enc/01-gzip.t
 t/pod-coverage.t
 t/pod.t
