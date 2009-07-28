@@ -2,7 +2,7 @@ NAME
     AnyEvent::Queue - Bundle of queue tools
 
 VERSION
-    Version 0.01
+    Version 0.05
 
 SYNOPSIS
         use AnyEvent::Queue::Client;
