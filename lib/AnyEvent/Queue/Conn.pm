@@ -23,17 +23,31 @@ sub new {
 	my $self = bless { @_ }, $pkg;
 	$self->{h} = AnyEvent::Handle->new(
 		fh => $self->{fh},
+		autocork => 1,
 		on_eof => sub {
 			local *__ANON__ = 'conn.on_eof';
 			warn "eof on handle";
 			delete $self->{h};
+			for my $k (keys %{ $self->{waitingcb} }) {
+				if ($self->{waitingcb}{$k}) {
+					$self->{waitingcb}{$k}->(undef, "eof from client");
+				}
+				delete $self->{waitingcb}{$k};
+			}
 			$self->event('disconnect');
 		},
 		on_error => sub {
 			local *__ANON__ = 'conn.on_error';
-			warn "error on handle: $!";
+			my $e = "$!";
+			warn "error on handle: $e";
 			delete $self->{h};
-			$self->event( disconnect => "Error: $!" );
+			for my $k (keys %{ $self->{waitingcb} }) {
+				if ($self->{waitingcb}{$k}) {
+					$self->{waitingcb}{$k}->(undef, "$e");
+				}
+				delete $self->{waitingcb}{$k};
+			}
+			$self->event( disconnect => "Error: $e" );
 		},
 	);
 	$self;
@@ -59,6 +73,8 @@ sub command {
 	my %args = @_;
 	$args{cb} or return $self->event( error => "no cb for command at @{[ (caller)[1,2] ]}" );
 	$self->{h} or return $args{cb}->(undef,"Not connected");
+	$self->{waitingcb}{int $args{cb}} = $args{cb};
+	
 	#my $i if 0;
 	#my $c = ++$i;
 	warn ">> $write  " if $self->{debug};
@@ -73,6 +89,7 @@ sub command {
 			substr($_,-1,1) = '' if substr($_, -1,1) eq "\015";
 		}
 		warn "<< @_  " if $self->{debug};
+		delete $self->{waitingcb}{int $args{cb}};
 		$args{cb}->(@_)
 	} );
 	#sub {
@@ -102,11 +119,13 @@ sub recv {
 	$args{cb} or return $self->event( error => "no cb for command at @{[ (caller)[1,2] ]}" );
 	$self->{h} or return $args{cb}->(undef,"Not connected");
 	warn "<+ read $bytes " if $self->{debug};
+	$self->{waitingcb}{int $args{cb}} = $args{cb};
 	$self->{h}->unshift_read( chunk => $bytes, sub {
 		local *__ANON__ = 'conn.recv.read';
 		# Also eat CRLF or LF from read buffer
 		substr( $self->{h}{rbuf}, 0, 1 ) = '' if substr( $self->{h}{rbuf}, 0, 1 ) eq "\015";
 		substr( $self->{h}{rbuf}, 0, 1 ) = '' if substr( $self->{h}{rbuf}, 0, 1 ) eq "\012";
+		delete $self->{waitingcb}{int $args{cb}};
 		shift; $args{cb}->(@_);
 	} );
 }

@@ -35,14 +35,18 @@ our $NL = "\015\012";
 
 sub new {
 	my $self = shift->next::method(@_);
-	$self->{state}{watching} = 1;
-	$self->{state}{watch}{default}++;
-	$self->{state}{use} = 'default';
+	$self->reg_cb(connected => sub {
+		$self->{state}{watching} = 1;
+		$self->{state}{watch}{default}++;
+		$self->{state}{use} = 'default';
+	});
 	$self;
 }
 
 sub _put  { shift->_add('put', @_) }
 sub _push { shift->_add('push',@_) }
+
+sub _ping { my $self = shift; my %args = @_; $self->__ping($args{cb}) }
 
 sub _add {
 	my $self = shift;
@@ -157,14 +161,16 @@ sub _extract_id_cb {
 	my $self = shift;
 	my %args = @_;
 	$args{cb} or return $self->event( error => "no cb at @{[ (caller)[1,2] ]}" );
-	my ($id);
+	my ($id,$pri);
 	if ($args{job}) {
 		$id = $args{job}{id};
+		$pri = $args{job}{pri};
 	} else {
 		$id = $args{id};
+		$pri = $args{pri};
 	}
 	$id or confess "No id";
-	return ($id,$args{cb});
+	return ($id,$args{cb},$pri);
 }
 
 sub _give_back {
@@ -221,12 +227,17 @@ sub _release {
 	$self->__release( $id, $pri, $args{delay}, $args{cb});
 }
 sub _ack     { shift->_delete(@_) }
-sub _bury    { shift->_give_back('bury',    @_) }
 
 sub _delete  {
 	my $self = shift;
 	my ($id,$cb) = $self->_extract_id_cb(@_);
 	$self->__delete($id,$cb);
+}
+
+sub _bury  {
+	my $self = shift;
+	my ($id,$cb,$pri) = $self->_extract_id_cb(@_);
+	$self->__bury($id,$pri,$cb);
 }
 
 sub _stats {
@@ -238,6 +249,7 @@ sub _stats {
 	$self->{con} or return $args{cb}->(undef, "Not connected");
 	$self->{con}->command($cmd, cb => sub {
 		local $_ = shift;
+		defined or return $args{cb}(undef, @_);
 		if (/^OK\s+(\d+)\s*$/) {
 			my ($len) = ($1);
 			$self->{con}->recv( $len, cb => sub {
@@ -552,6 +564,22 @@ sub __watch {
 			$self->{state}{watching} = $1;
 			$self->{state}{watch}{$dst}++;
 			$cb->($self->{state}{watching});
+		} else {
+			$cb->(undef,$_);
+			return;
+		}
+	});
+}
+
+sub __ping {
+	my $self = shift;
+	my $cb = shift;
+	$self->{con}->command("ping", cb => sub {
+		local $_ = shift;
+		defined or return $cb->(undef,@_);
+		#diag "<< ping: $_";
+		if (/UNKNOWN_COMMAND/) {
+			$cb->('OK');
 		} else {
 			$cb->(undef,$_);
 			return;

@@ -29,6 +29,8 @@ use Data::Dumper;
 
 sub ready          { defined(shift->{con}) ? 1 : 0 } # is queue connected?
 
+sub ping           { shift->any_method( _ping  => @_ ) };
+
 sub create         { shift->any_method( _create  => @_ ) } # register queue
 sub drop           { shift->any_method( _drop  => @_ ) } # drop queue (use with caution)
 
@@ -160,7 +162,7 @@ sub mk_connection {
 				$self->mk_connection(%args) if $self->{reconnect};
 			},
 			disconnect => sub {
-				warn "got dis from con";
+				#warn "got dis from con";
 				#$SIG{ALRM} = sub { confess "Fuck" };
 				#alarm 2;
 				delete $self->{con};
