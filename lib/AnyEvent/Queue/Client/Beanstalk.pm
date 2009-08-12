@@ -464,14 +464,10 @@ sub __reserve {
 					data => $data,
 					pri => DEFPRI,
 				};
-				#$self->{reserved}{$job} = undef; # mark key
 				if ( $self->{state}{watching} == 1 ) {
 					($j->{src}) = keys %{ $self->{state}{watch} };
 				} 
-				#$self->{reserved}{$job} = {
-				#	job => $job,
-				#};
-				my $rc = $cb->( $self->job($j) );
+				$cb->( $self->job($j) );
 				undef $cb;
 			}); # read_chunk
 		}

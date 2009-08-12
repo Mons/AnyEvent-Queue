@@ -29,30 +29,33 @@ use Data::Dumper;
 
 sub ready          { defined(shift->{con}) ? 1 : 0 } # is queue connected?
 
-sub ping           { shift->any_method( _ping  => @_ ) };
+sub ping           { shift->_ping( @_ ) };
+
+sub create         { shift->_create( @_ ) } # register queue
+sub drop           { shift->_drop( @_ ) } # drop queue (use with caution)
 
 sub create         { shift->any_method( _create  => @_ ) } # register queue
 sub drop           { shift->any_method( _drop  => @_ ) } # drop queue (use with caution)
 
-sub put            { shift->any_method( _put  => @_ ) };  # normal add
-sub push:method    { shift->any_method( _push => @_ ) };  # out of order add
+sub put            { shift->_put( @_ ) };  # normal add
+sub push:method    { shift->_push( @_ ) };  # out of order add
 
-sub take           { shift->any_method( _take => @_ )};
-sub requeue        { shift->any_method( _requeue => @_ ) };
-sub release        { shift->any_method( _release => @_ ) };
-sub ack            { shift->any_method( _ack => @_ ) };
-sub bury           { shift->any_method( _bury => @_ ) };
+sub take           { shift->_take( @_ )};
+sub requeue        { shift->_requeue ( @_ ) };
+sub release        { shift->_release ( @_ ) };
+sub ack            { shift->_ack ( @_ ) };
+sub bury           { shift->_bury ( @_ ) };
 
-sub peek           { shift->any_method( _peek => @_ ) };
-sub delete:method  { shift->any_method( _delete => @_ ) };
-sub update         { shift->any_method( _update => @_ ) };
+sub peek           { shift->_peek ( @_ ) };
+sub delete:method  { shift->_delete ( @_ ) };
+sub update         { shift->_update ( @_ ) };
 
-sub stats          { shift->any_method( _stats => @_ ) };
-sub fullstats      { shift->any_method( _fullstats => @_ ) };
+sub stats          { shift->_stats ( @_ ) };
+sub fullstats      { shift->_fullstats ( @_ ) };
 
-sub queues         { shift->any_method( _queues => @_ ) };
+sub queues         { shift->_queues ( @_ ) };
 
-sub connect:method { shift->any_method( mk_connection => cb=>sub{},@_ ); }
+sub connect:method { shift->_connect( @_ ); }
 
 
 =head1 FEATURES
@@ -98,8 +101,8 @@ sub new {
 		%args,
 	}, $pkg;
 	
-	unless ( $self->{job_class}->can('new') ) {
-		my $file = join '/', split '::', $self->{job_class}.'.pm';
+	unless ( $self->job_class->can('new') ) {
+		my $file = join '/', split '::', $self->job_class.'.pm';
 		require $file;
 	}
 	
@@ -114,7 +117,7 @@ sub new {
 	$self;
 }
 
-sub mk_connection {
+sub _connect {
 	my ($self,%args) = @_;
 	
 	#my $cv;$cv = AnyEvent->condvar if $self->{sync};
@@ -143,7 +146,7 @@ sub mk_connection {
 			if ($self->{reconnect}) {
 				my $t;$t = AnyEvent->timer( after => 0.1, cb => sub {
 					undef $t;
-					$self->mk_connection(%args);
+					$self->_connect(%args);
 				} );
 			}
 			return;
@@ -159,7 +162,7 @@ sub mk_connection {
 				delete $self->{con};
 				defined $self->{current_cb} and  $self->{current_cb}->(undef,@_);
 				$self->event( error => @_ );
-				$self->mk_connection(%args) if $self->{reconnect};
+				$self->_connect(%args) if $self->{reconnect};
 			},
 			disconnect => sub {
 				#warn "got dis from con";
@@ -168,7 +171,7 @@ sub mk_connection {
 				delete $self->{con};
 				defined $self->{current_cb} and  $self->{current_cb}->(undef,@_);
 				$self->event( disconnect => @_ );
-				$self->mk_connection(%args) if $self->{reconnect};
+				$self->_connect(%args) if $self->{reconnect};
 			},
 		);
 		$self->event( connected => $con, "$host:$port" );
