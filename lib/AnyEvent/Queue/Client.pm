@@ -125,7 +125,7 @@ sub mk_connection {
 	my ($host,$port) = $self->{servers}[$self->{current_server}++] =~ /([^:]+)(?::(\d+)|)/;
 	$host ||= 'localhost';
 	$port ||= 11212;
-	# carp "Connecting to $host:$port";
+	carp "Connecting to $host:$port" if $self->{debug};
 	my $g;$g = tcp_connect $host, $port, sub {
 		undef $g;
 		my $fh = shift or do {
@@ -146,7 +146,8 @@ sub mk_connection {
 			}
 			return;
 		};
-		#warn "connected";
+		my ($h,$p) = @_;
+		warn "connected to $h:$p" if $self->{debug};
 		$self->{con} = my $con = AnyEvent::Queue::Conn->new(
 			fh => $fh,
 			debug => defined $self->{debug_proto} ? $self->{debug_proto} : $self->{debug},
@@ -252,6 +253,8 @@ sub any_method { # either sync or async
 			local *__ANON__ = "$method:sync";
 			$cv->send(@_);
 			$old and $old->(@_);
+			undef $cv;
+			@args = ();
 		};
 	}
 	push @args, cb => $cb if $cb;

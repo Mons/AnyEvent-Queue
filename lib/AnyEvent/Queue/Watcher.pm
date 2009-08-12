@@ -17,9 +17,6 @@ sub new {
 		$cb{$_} = delete $args{$_} if ref $args{$_} eq 'CODE';
 	}
 	my $self = bless {
-		_ => {
-			rps   => [],                      # keeper for rps info
-		},
 		prefetch => 1, # take N tasks in parallel
 		delay    => 0, # fetch using delay between takes
 		rate     => 0, # fetch using rate limit
@@ -47,6 +44,7 @@ sub stop {
 
 sub rps {
 	my $self = shift;
+	return wantarray ? (0,0) : 0 unless $self->{rps};
 	my $concurrency = shift || 1;
 	#warn "rps ($concurrency)";
 	my $now = time;
@@ -101,7 +99,7 @@ sub taken_cb {
 	#warn "taken: cf = $self->{curfetch}, taking = $self->{taking}, taken = $self->{taken}{count}";
 	if ($job) {
 		$self->{nomore} = 0;
-		push @{ $self->{rps}{_} },time;
+		push @{ $self->{rps}{_} },time if $self->{rps};
 		$self->eventif( job => $job ) or warn "job not handled";
 		$self->{taken}{count}++;
 		if ( $self->{curfetch} < $self->{prefetch} ) {

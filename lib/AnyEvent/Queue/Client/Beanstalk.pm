@@ -48,37 +48,37 @@ sub _add {
 	my $self = shift;
 	my $cmd  = shift;
 	
-	my %args = @_;
-	my $data = $args{data} or croak "No data for $cmd";
-	$data = $self->{encoder}->encode($data) if ref $data;
+	my %args = @_;@_ = ();
+	$args{data} or croak "No data for $cmd";
+	$args{data} = $self->{encoder}->encode($args{data}) if ref $args{data};
 	$args{cb} or return $self->event( error => "no cb for put at @{[ (caller)[1,2] ]}" );
 	
-	my $dst = $args{dst} || 'default';
-	$dst =~ s/\s+/-/sg;
+	( $args{dst} ||= 'default' ) =~ s/\s+/-/sg;
 
+	$args{delay} ||= 0;
+	$args{pri} = 0 if $cmd eq 'push';
 
-	my $delay = $args{delay} || 0;
-	my $pri = $args{pri};
-	$pri = 0 if $cmd eq 'push';
-	my $ttr = $args{ttr};
 	my $put;$put = sub {
 		undef $put;
-		if ( ( my $sz = bytes::length($data) ) > $self->{max_job_size} ) {
-			return $args{cb}->(undef,"Job too big ($sz), max allowed: $self->{max_job_size}");
+		if ( ( my $sz = bytes::length($args{data}) ) > $self->{max_job_size} ) {
+			$args{cb}(undef,"Job too big ($sz), max allowed: $self->{max_job_size}");
+			%args = ();
+			return;
 		}
-		$self->__use( $dst, sub {
-			shift or return $args{cb}->(undef,@_);
-			$self->__put($data,$pri,$delay,$ttr,sub {
-				my $action = shift or return $args{cb}->(undef,@_);
+		$self->__use( $args{dst}, sub {
+			shift or return do{ %args = ();$args{cb}->(undef,@_) };
+			$self->__put($args{data},$args{pri},$args{delay},$args{ttr},sub {
+				my $action = shift or return do{ %args = ();$args{cb}->(undef,@_) };
 				warn "Job was buried" if $action =~ /buried/;
 				my $id = shift;
 				my $job = $self->job({
 					id  => $id,
-					pri => $pri,
-					src => $dst,
-					data => $data,
+					pri => $args{pri},
+					src => $args{dst},
+					data => $args{data},
 				});
 				$args{cb}->($job);
+				%args = ();
 			});
 		});
 	};
@@ -90,6 +90,7 @@ sub _add {
 			} else {
 				undef $put;
 				$args{cb}->(undef,@_);
+				%args = ();
 			}
 		});
 	} else {
@@ -451,22 +452,25 @@ sub __reserve {
 					data => $data,
 					pri => DEFPRI,
 				};
-				$self->{reserved}{$job} = undef; # mark key
+				#$self->{reserved}{$job} = undef; # mark key
 				if ( $self->{state}{watching} == 1 ) {
 					($j->{src}) = keys %{ $self->{state}{watch} };
 				} 
-				$self->{reserved}{$job} = {
-					job => $job,
-				};
+				#$self->{reserved}{$job} = {
+				#	job => $job,
+				#};
 				my $rc = $cb->( $self->job($j) );
+				undef $cb;
 			}); # read_chunk
 		}
 		elsif (/TIMED_OUT|DEADLINE_SOON/) {
-			$cb->(0)
+			$cb->(0);
+			undef $cb;
 		}
 		else {
 			warn "reserve failed: $_";
 			$cb->(undef, $_);
+			undef $cb;
 		}
 	});
 }
@@ -486,6 +490,7 @@ sub __delete {
 		else {
 			$self->__e($cb);
 		}
+		undef $cb;
 	});
 }
 
