@@ -34,9 +34,6 @@ sub ping           { shift->_ping( @_ ) };
 sub create         { shift->_create( @_ ) } # register queue
 sub drop           { shift->_drop( @_ ) } # drop queue (use with caution)
 
-sub create         { shift->any_method( _create  => @_ ) } # register queue
-sub drop           { shift->any_method( _drop  => @_ ) } # drop queue (use with caution)
-
 sub put            { shift->_put( @_ ) };  # normal add
 sub push:method    { shift->_push( @_ ) };  # out of order add
 

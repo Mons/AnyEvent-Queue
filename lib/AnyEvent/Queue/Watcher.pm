@@ -1,5 +1,6 @@
 package AnyEvent::Queue::Watcher;
 
+use strict;
 use base 'Object::Event';
 use Data::Dumper;
 use Carp;

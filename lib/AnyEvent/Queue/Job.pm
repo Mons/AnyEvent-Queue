@@ -1,11 +1,10 @@
 package AnyEvent::Queue::Job;
 
-use strict;
+use common::sense;
 use Carp;
 our @F;
 BEGIN{
 	@F = qw(id src pri delay state ttr data);
-	no strict 'refs';
 	for my $f (@F) {
 		*$f = sub { shift->{$f} };
 	}

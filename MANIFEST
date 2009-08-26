@@ -15,6 +15,7 @@ lib/AnyEvent/Queue.pm
 lib/AnyEvent/Queue/Client.pm
 lib/AnyEvent/Queue/Client/Beanstalk.pm
 lib/AnyEvent/Queue/Client/PMQ.pm
+lib/AnyEvent/Queue/Client/STOMP.pm
 lib/AnyEvent/Queue/Conn.pm
 lib/AnyEvent/Queue/Encoder/Any.pm
 lib/AnyEvent/Queue/Encoder/Gzip.pm
@@ -27,6 +28,7 @@ lib/AnyEvent/Queue/Server.pm
 lib/AnyEvent/Queue/Server/Impl/InMem.pm
 lib/AnyEvent/Queue/Server/PMQ.pm
 lib/AnyEvent/Queue/Server/Proto/PMQ.pm
+lib/AnyEvent/Queue/test.pl
 lib/AnyEvent/Queue/Watcher.pm
 makeall.sh
 Makefile.PL
