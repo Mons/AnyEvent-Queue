@@ -23,6 +23,11 @@ use AnyEvent::Queue::Job;
 use Scalar::Util qw(weaken);
 use Data::Dumper;
 
+use Devel::FindRef;
+use Devel::Refcount qw( refcount );
+sub findref(@);
+*findref = \&Devel::FindRef::track;
+
 =head1 INTERFACE
 
 =cut
@@ -110,6 +115,7 @@ sub new {
 	}
 	
 	$self->reg_cb(%cb);
+	%args = %cb = ();
 	
 	$self;
 }
@@ -196,8 +202,9 @@ sub watcher {
 		%args,
 	);
 	weaken($watcher->{client});
-	$self->{watcher}{$src} = $watcher;
+	#$self->{watcher}{$src} = $watcher;
 	$watcher->run;
+	#print "New watcher: ".findref( $watcher ),"\n";
 	$watcher;
 }
 
@@ -226,6 +233,7 @@ sub any_method { # either sync or async
 	my $cb;
 	my $sync;
 	my @args;
+	warn "any_method";
 	for (@_) {
 		if ($_ and !ref and $_ eq 'cb') {
 			$cb = 1;

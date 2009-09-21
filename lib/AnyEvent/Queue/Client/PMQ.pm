@@ -6,6 +6,7 @@ use Data::Dumper;
 use base 'AnyEvent::Queue::Client';
 
 use constant DEFPRI => 16;
+use Errno ();
 use AnyEvent::Queue::Encoder::JSON;
 our $json;
 BEGIN { $json = AnyEvent::Queue::Encoder::JSON->new; }
@@ -68,7 +69,12 @@ sub _add {
 			carp "Id mismatch: requested: $id, got: $job->{id}" if length $id and $id != $job->{id};
 			
 			$args{cb}->($job);
-		} else {
+		}
+		elsif(/^DUPLICATE\s+(\d+)$/) {
+			local $! = Errno::EEXIST;
+			$args{cb}(undef, "Duplicate entry of id $1");
+		}
+		else {
 			local $@ = $_;
 			$args{cb}->(undef, $_);
 		}
@@ -142,13 +148,19 @@ sub _give_back {
 
 	$id or confess "No id for $cmd";
 	$delay = $args{delay} if exists $args{delay}; # argument have priority over job
+	$delay = 0 unless defined $delay;
 
 	$self->{con} or return $args{cb}->(undef, "Not connected");
-	$self->{con}->command("$cmd $dst $id $delay", cb => sub {
+	$self->{con}->command("$cmd $dst $id".($cmd eq 'delete' ? '' : " $delay"), cb => sub {
 		local $_ = shift;
 		if (/^OK\s*$/) {
-			$args{cb}->(1);
-		} else {
+			$args{cb}($id);
+		}
+		elsif(/^NOT_FOUND\s*$/) {
+			local $! = Errno::ENOENT;
+			$args{cb}(0);
+		}
+		else {
 			local $@ = $_;
 			$args{cb}->(undef, $_);
 		}
@@ -183,7 +195,7 @@ sub _stats {
 					$self->event( error => undef, "Failed to decode data: $@", $data );
 					$args{cb}->(undef, "Failed to decode data: $@",$data);
 				} else {
-					#warn "Received stats for ".($q ? $q : '<all>').":". Dumper($deco);
+					warn "Received stats for ".($q ? $q : '<all>').":". Dumper($deco);
 					if (!defined $deco->{total}) {
 						$deco->{total} = 0;
 						$deco->{total} += $deco->{$_} for qw( active buried );
@@ -257,6 +269,7 @@ sub _update {
 	exists $args{data} or croak "No data for update";
 
 	$delay = $args{delay} if exists $args{delay}; # argument have priority over job
+	$delay = 0 unless defined $delay;
 
 	my $data = $args{data};
 	$data = $self->{encoder}->encode($data) if ref $data;
@@ -268,10 +281,15 @@ sub _update {
 	$self->{con}->command("update $dst $id $pri $length $delay\r\n$data", cb => sub {
 		local $_ = shift;
 		if (/^OK\s*$/) {
-			$args{cb}->(1);
-		} else {
+			$args{cb}(1);
+		}
+		elsif(/^NOT_FOUND\s*$/) {
+			local $! = Errno::ENOENT;
+			$args{cb}(0);
+		}
+		else {
 			local $@ = $_;
-			$args{cb}->(undef, $_);
+			$args{cb}(undef, $_);
 		}
 	});
 	

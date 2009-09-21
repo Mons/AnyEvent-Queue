@@ -4,10 +4,19 @@ use strict;
 use base 'Object::Event';
 use Data::Dumper;
 use Carp;
+use R::Dump;
 
 use Time::HiRes qw(time);
 
+use Devel::FindRef;
+use Scalar::Util qw(weaken);
+use Devel::Refcount qw( refcount );
+sub findref(@);
+*findref = \&Devel::FindRef::track;
 use constant::def DEBUG => 0;
+
+sub after (&$)    { my $cb = shift; my $t;$t = AnyEvent->timer( after=> $_[0], cb => sub { undef $t; goto &$cb });return; }
+#sub periodic (&$) {  }
 
 sub new {
 	my $pk = shift;
@@ -34,6 +43,7 @@ sub new {
 	$self->{taking} = 0; # currently in progress
 	$self->{nomore} = 0;
 	$self->reg_cb(%cb);
+	%args = %cb = ();
 	$self;
 }
 
@@ -94,7 +104,7 @@ sub rps {
 }
 
 sub taken_cb {
-	my $self = shift;
+	weaken( my $self = shift );
 	my $job = shift;
 	$self->{taking}--;
 	#warn "taken: cf = $self->{curfetch}, taking = $self->{taking}, taken = $self->{taken}{count}";
@@ -102,6 +112,7 @@ sub taken_cb {
 		$self->{nomore} = 0;
 		push @{ $self->{rps}{_} },time if $self->{rps};
 		$self->eventif( job => $job ) or warn "job not handled";
+		$self->{taken}{ $job->src }{ $job->id } = $job;
 		$self->{taken}{count}++;
 		if ( $self->{curfetch} < $self->{prefetch} ) {
 			$self->{curfetch}++;
@@ -110,17 +121,15 @@ sub taken_cb {
 	} else {
 		$self->{nomore}++ or $self->eventif( nomore => () ) or warn "nomore not handled";
 		if ($self->{curfetch} > 1) {
-			warn "curfetch $self->{curfetch} => 1";
+			#warn "curfetch $self->{curfetch} => 1";
 			$self->{curfetch} = 1;
 		}
 		unless ($self->{stopping}) {
-			my $timer;
-			#warn "want more";
-			$timer = AnyEvent->timer( after => 0.3 , cb => sub {
-				undef $timer;
+			warn "want more $self ".refcount($self);
+			after {
+				$self or warn("Destroyed taken_cb"),return;
 				$self->_run;
-				#$self->{client}->take( src => $self->{source}, cb => sub { $self->taken_cb(@_) } );
-			});
+			} 0.3;
 		} else {
 			$self->_run; # check for termination
 		}
@@ -128,7 +137,9 @@ sub taken_cb {
 }
 
 sub _run {
-	my $self = shift;
+	weaken(
+		my $self = shift
+		);
 	#warn "_run ($self->{taken}{count})";
 	if ($self->{stopping}) {
 		if (!$self->{taking} and !$self->{taken}{count}) {
@@ -149,20 +160,24 @@ sub _run {
 			my $cdelay = $delay * ($_ - $self->{taken}{count} - 1);
 			#warn "_run with cdelay = $cdelay ($delay x $self->{curfetch})";
 			if ($cdelay) {
-				my $timer;
-				$timer = AnyEvent->timer( after => $cdelay , cb => sub {
-					undef $timer;
-					#warn "<<take";
+				after {
+					$self or warn("Destroyed (_run)"),return;
 					return if $self->{taking} + $self->{taken}{count} >= $self->{curfetch};
+					#warn "<< take";
 					$self->{taking}++;
-					$self->{client}->take( src => $self->{source}, cb => sub { $self->taken_cb(@_) } );
-				});
+					$self->{client}->take( src => $self->{source}, cb => sub {
+						$self or warn("Destroyed (take)"),return;
+						$self->taken_cb(@_);
+					} );
+				} $cdelay;
 			} else {
 				#warn "<<take";
 				$self->{taking}++;
-				$self->{client}->take( src => $self->{source}, cb => sub { $self->taken_cb(@_) } );
+				$self->{client}->take( src => $self->{source}, cb => sub { $self->taken_cb(@_); } );
 			}
 		}
+	#print "watcher run: ".findref( $self ),"\n";
+	return;
 }
 
 sub run {
@@ -176,19 +191,22 @@ sub run {
 		undef $self->{stopping};
 	}
 	$self->_run;
+	return;
 }
 
 sub maybe_take {
-	my $self = shift;
+	weaken( my $self = shift );
 	#warn "maybe take ($self->{taking} + $self->{taken}{count} > $self->{curfetch})";
 	return $self->{taking}--, $self->_run if $self->{stopping};
 	return $self->{taking}-- if $self->{taking} + $self->{taken}{count} > $self->{curfetch};
 	#warn "maybe take ($self->{taking} + $self->{taken}{count} > $self->{curfetch}) do";
-	$self->{client}->take( src => $self->{source}, cb => sub { $self->taken_cb(@_) } );
+	$self->{client}->take( src => $self->{source}, cb => sub {
+		$self and $self->taken_cb(@_);
+	} );
 }
 
 sub next_take {
-	my $self = shift;
+	weaken( my $self = shift );
 	$self->{taken}{count}--;
 	#warn "next take ($self->{taken}{count})";
 	return $self->_run if $self->{stopping};
@@ -196,24 +214,21 @@ sub next_take {
 		# TODO: rate limit
 		my ($rps,$wait) = $self->rps($self->{curfetch});
 		#warn "Rate: $self->{rate}, rps = $rps, wait = $wait";
-		my $timer;
 		$self->{taking}++;
-		$timer = AnyEvent->timer( after => $wait , cb => sub {
-			undef $timer;
-			$self->maybe_take;
-		});
+		after {
+			$self and $self->maybe_take;
+		} $wait;
 	}
 	elsif ($self->{delay}) {
-		my $timer;
 		$self->{taking}++;
-		$timer = AnyEvent->timer( after => $self->{delay} , cb => sub {
-			undef $timer;
-			$self->maybe_take;
-		});
-		
+		after {
+			$self and $self->maybe_take;
+		} $self->{delay};
 	} else {
 		$self->{taking}++;
-		$self->{client}->take( src => $self->{source}, cb => sub { $self->taken_cb(@_) } );
+		$self->{client}->take( src => $self->{source}, cb => sub {
+			$self and $self->taken_cb(@_);
+		} );
 	}
 	
 }
@@ -221,12 +236,19 @@ sub next_take {
 sub release {
 	my $self = shift;
 	my %args = @_;
+	my $job = $args{job};
 	$self->{client} or return $args{cb}->(undef,"No client");
 	$self->{client}->release(
 		%args,
 		cb => sub {
 			local *__ANON__ = 'release.cb';
+			if (my $id = shift) {
+				delete $self->{taken}{$job->{src}}{$job->{id}};
+			} else {
+				warn "release $job->{src}.$job->{id} failed: @_" if @_;
+			}
 			eval{ $args{cb}->(@_) if $args{cb}; 1 } or carp "cb failed: $@";
+			%args = ();
 			$self->next_take();
 		}
 	);
@@ -235,12 +257,19 @@ sub release {
 sub requeue {
 	my $self = shift;
 	my %args = @_;
+	my $job = $args{job};
 	$self->{client} or return $args{cb}->(undef,"No client");
 	$self->{client}->requeue(
 		%args,
 		cb => sub {
 			local *__ANON__ = 'requeue.cb';
+			if (my $id = shift) {
+				delete $self->{taken}{$job->{src}}{$job->{id}};
+			} else {
+				warn "requeue $job->{src}.$job->{id} failed: @_" if @_;
+			}
 			eval{ $args{cb}->(@_) if $args{cb}; 1 } or carp "cb failed: $@";
+			%args = ();
 			$self->next_take();
 		}
 	);
@@ -249,12 +278,19 @@ sub requeue {
 sub ack {
 	my $self = shift;
 	my %args = @_;
+	my $job = $args{job};
 	$self->{client} or return $args{cb}->(undef,"No client");
 	$self->{client}->ack( 
 		%args,
 		cb => sub {
 			local *__ANON__ = 'ack.cb';
+			if (my $id = shift) {
+				delete $self->{taken}{$job->{src}}{$job->{id}};
+			} else {
+				warn "ack $job->{src}.$job->{id} failed: @_" if @_;
+			}
 			eval{ $args{cb}->(@_) if $args{cb}; 1 } or carp "cb failed: $@";
+			%args = ();
 			$self->next_take();
 		}
 	);
@@ -263,12 +299,19 @@ sub ack {
 sub bury {
 	my $self = shift;
 	my %args = @_;
+	my $job = $args{job};
 	$self->{client} or return $args{cb}->(undef,"No client");
 	$self->{client}->bury( 
 		%args,
 		cb => sub {
 			local *__ANON__ = 'bury.cb';
+			if (my $id = shift) {
+				delete $self->{taken}{$job->{src}}{$job->{id}};
+			} else {
+				warn "bury $job->{src}.$job->{id} failed: @_" if @_;
+			}
 			eval{ $args{cb}->(@_) if $args{cb}; 1 } or carp "cb failed: $@";
+			%args = ();
 			$self->next_take();
 		}
 	);
@@ -299,6 +342,33 @@ sub handle {
 			warn "$cmd event not handled";
 			0;
 		};
+}
+
+sub DESTROY {
+	my $self = shift;
+	warn "Destroying object $self: @{[ keys %{$self->{taken}} ]}";
+	my $global = 0;
+	{
+		local $SIG{__WARN__} = sub { $global = 1 if $_[0] =~ /during global destruction\.\n$/is; };
+		warn "test";
+	}
+	return if $global;
+	#$self->stop(cb => sub {
+	#	warn "Destroyed watcher stopped";
+	#	undef $self;
+	#});
+	my $client = $self->{client};
+	for my $dst (keys %{$self->{taken}}) {
+		next unless ref $self->{taken}{$dst};
+		#warn "destroy $dst.[ @{[ keys %{$self->{taken}{$dst}} ]} ]";
+		for my $id (keys %{$self->{taken}{$dst}}) {
+			$client->release( job => $self->{taken}{$dst}{$id}, cb => sub {
+				warn "destroy release $dst.$id: @_";
+				delete $self->{taken}{$dst}{$id}
+			});
+		}
+		delete $self->{taken}{$dst};
+	}
 }
 
 1;
