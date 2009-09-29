@@ -4,6 +4,7 @@ use strict;
 use Carp;
 use Data::Dumper;
 use base 'AnyEvent::Queue::Client';
+use Scalar::Util qw(weaken);
 
 use AnyEvent::Queue::Encoder::YAML;
 use bytes ();
@@ -35,10 +36,12 @@ our $NL = "\015\012";
 
 sub new {
 	my $self = shift->next::method(@_);
-	$self->reg_cb(connected => sub {
-		$self->{state}{watching} = 1;
-		$self->{state}{watch}{default}++;
-		$self->{state}{use} = 'default';
+	weaken(my $me = $self);
+	$me->reg_cb(connected => sub {
+		$me or return;
+		$me->{state}{watching} = 1;
+		$me->{state}{watch}{default}++;
+		$me->{state}{use} = 'default';
 	});
 	$self;
 }
@@ -138,9 +141,12 @@ sub _take {
 	my $self = shift;
 	my %args = @_;
 	my $src = $args{src} || $args{dst} || 'default';
+	::measure('bt take begin');
 	$self->__watch_only($src, sub {
+		::measure('bt watch ok');
 		if (shift) {
 			$self->__reserve(sub {
+				::measure('bt reserve end');
 				$args{cb}->(@_);
 			});
 		} else {
@@ -451,12 +457,15 @@ sub __put {
 sub __reserve {
 	my $self = shift;
 	my $cb = shift;
+	::measure('bt __reserve begin');
 	$self->{con}->command("reserve-with-timeout 1", cb => sub {
 		local $_ = shift;
 		if (/RESERVED (\d+) (\d+)/) {
 			my ($job,$size) = ($1,$2);
+			::measure('bt __reserve ok, reading');
 			$self->{con}->recv($size+2, cb => sub { # +2 means with \r\n
 				my $data = shift;
+				::measure('bt __reserve got data');
 				substr($data,$size) = ''; # truncate trailing garbage
 				#diag "<+ reserved: job $job, data (".length($_[1])."): $_[1]";
 				my $j = {
@@ -472,7 +481,7 @@ sub __reserve {
 			}); # read_chunk
 		}
 		elsif (/TIMED_OUT|DEADLINE_SOON/) {
-			$cb->(0);
+			$cb->(undef,'NO JOBS');
 			undef $cb;
 		}
 		else {

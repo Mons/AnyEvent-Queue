@@ -3,6 +3,7 @@ package AnyEvent::Queue::Conn;
 use strict;
 use base 'Object::Event';
 use AnyEvent::Handle;
+use Scalar::Util qw(weaken);
 use Data::Dumper;
 
 our $NL = "\015\012";
@@ -26,7 +27,7 @@ sub new {
 		autocork => 1,
 		on_eof => sub {
 			local *__ANON__ = 'conn.on_eof';
-			warn "eof on handle";
+			warn "[\U$self->{side}\E] Eof on handle";
 			delete $self->{h};
 			for my $k (keys %{ $self->{waitingcb} }) {
 				if ($self->{waitingcb}{$k}) {
@@ -39,7 +40,11 @@ sub new {
 		on_error => sub {
 			local *__ANON__ = 'conn.on_error';
 			my $e = "$!";
-			warn "error on handle: $e";
+			if ( $self->{destroying} ) {
+				$e = "Connection closed";
+			} else {
+				#warn "[\U$self->{side}\E] Error on handle: $e"; # TODO: uncomment
+			}
 			delete $self->{h};
 			for my $k (keys %{ $self->{waitingcb} }) {
 				if ($self->{waitingcb}{$k}) {
@@ -56,8 +61,9 @@ sub new {
 sub close {
 	my $self = shift;
 	undef $self->{fh};
-	$self->{h}->destroy;
+	$self->{h} and $self->{h}->destroy;
 	undef $self->{h};
+	$self->{destroying} = 1;
 	return;
 }
 
@@ -73,7 +79,7 @@ sub command {
 	my %args = @_;
 	$args{cb} or return $self->event( error => "no cb for command at @{[ (caller)[1,2] ]}" );
 	$self->{h} or return $args{cb}->(undef,"Not connected");
-	$self->{waitingcb}{int $args{cb}} = $args{cb};
+	weaken( $self->{waitingcb}{int $args{cb}} = $args{cb} );
 	
 	#my $i if 0;
 	#my $c = ++$i;
@@ -90,8 +96,46 @@ sub command {
 		}
 		warn "<< @_  " if $self->{debug};
 		delete $self->{waitingcb}{int $args{cb}};
-		$args{cb}->(@_)
+		delete($args{cb})->(@_);
+		%args = ();
+		undef $self;
 	} );
+	#sub {
+		#$self->{state}{handle}->timeout( 0 ) if $self->_qsize < 1;
+		#diag "<< $c. $write: $_[1] (".$self->_qsize."), timeout ".($self->{state}{handle}->timeout ? 'enabled' : 'disabled');
+		#$cb->(@_);
+	#});
+}
+
+sub commandx {
+	my ($debug,%args);
+	$args{cf} = sub {
+		local *__ANON__ = 'conn.command.read';
+		shift;
+		for (@_) {
+			chomp;
+			substr($_,-1,1) = '' if substr($_, -1,1) eq "\015";
+		}
+		warn "<< @_  " if $debug;
+		#delete $self->{waitingcb}{int $args{cb}};
+		$args{cb}(@_);
+		%args = ();
+	};
+	{
+		my $self = shift;
+		my $write = shift;
+		%args = (@_, cf => $args{cf});
+		$args{write} = $write;
+		$args{cb} or return %args = (),$self->event( error => "no cb for command at @{[ (caller)[1,2] ]}" );
+		$self->{h} or return $args{cb}(undef,"Not connected"),%args=();
+		weaken($self->{waitingcb}{int $args{cb}} = $args{cb});
+		$debug = $self->{debug};
+		warn ">> $write  " if $self->{debug};
+		$self->{h}->push_write("$args{write}$NL");
+		warn "<? read  " if $debug;
+		$self->{h}->push_read( regex => $QRNL, $args{cf} );
+	}
+	#$self->{h}->timeout( $self->{select_timeout} );
 	#sub {
 		#$self->{state}{handle}->timeout( 0 ) if $self->_qsize < 1;
 		#diag "<< $c. $write: $_[1] (".$self->_qsize."), timeout ".($self->{state}{handle}->timeout ? 'enabled' : 'disabled');
@@ -101,7 +145,7 @@ sub command {
 
 sub want_command {
 	my $self = shift;
-	$self->{h} or return warn "Not connected";
+	$self->{h} or return warn "[\U$self->{side}\E] Not connected";
 	$self->{h}->push_read( regex => $QRNL, sub {
 		local *__ANON__ = 'conn.want_command.read';
 		shift;
@@ -132,9 +176,16 @@ sub recv {
 
 sub reply {
 	my $self = shift;
-	$self->{h} or return warn "Not connected";
+	$self->{h} or return warn "[\U$self->{side}\E] Not connected";
 	$self->{h}->push_write("@_$NL");
 	warn ">> @_  " if $self->{debug};
+}
+
+sub DESTROY {
+	my $self = shift;
+	warn "(".int($self).") Destroying conn";
+	$self->close;
+	#$self->destroy;
 }
 
 =back

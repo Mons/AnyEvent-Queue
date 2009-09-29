@@ -9,30 +9,32 @@ package AnyEvent::Queue::Client;
 =cut
 
 use strict;
-use Class::C3;
+use MRO::Compat;
 use Carp;
-use base 'Object::Event';
+use base 'AnyEvent::Connection';
 
 use AnyEvent::Handle;
 use AnyEvent::Socket;
 
-use AnyEvent::Queue::Conn;
 use AnyEvent::Queue::Watcher;
 use AnyEvent::Queue::Job;
+use Sub::Name;
 
 use Scalar::Util qw(weaken);
 use Data::Dumper;
 
+use R::Dump;
 use Devel::FindRef;
 use Devel::Refcount qw( refcount );
-sub findref(@);
+use AnyEvent::cb;
+sub findref;
 *findref = \&Devel::FindRef::track;
 
 =head1 INTERFACE
 
 =cut
 
-sub ready          { defined(shift->{con}) ? 1 : 0 } # is queue connected?
+sub ready          { shift->{connected} ? 1 : 0 } # is queue connected?
 
 sub ping           { shift->_ping( @_ ) };
 
@@ -57,14 +59,9 @@ sub fullstats      { shift->_fullstats ( @_ ) };
 
 sub queues         { shift->_queues ( @_ ) };
 
-sub connect:method { shift->_connect( @_ ); }
-
-
 =head1 FEATURES
 
 =cut
-
-sub cv { AnyEvent->condvar }
 
 use AnyEvent::Queue::Encoder::YAML;
 our $YML = AnyEvent::Queue::Encoder::YAML->new;
@@ -73,17 +70,25 @@ sub job {
 	my $self = shift;
 	#warn "New job".Dumper(\@_);
 	my $args = shift;
+	::measure('new job');
+	return $self->job_class->new( $args );
 	eval {
 		my $data = $self->{encoder}->decode($args->{data});
+		#warn "data = $args->{data} ".Dump($data);
 		$args->{data} = $data;
 	};
+	::measure('new job eval 1');
+	#warn if $@;
 	if (my $e = $@) {
 		eval {
 			my $data = $YML->decode($args->{data});
 			$args->{data} = $data;
 			#warn "default encoder $self->{encoder} failed ($e) but YML succeded";
 		};
+		::measure('new job eval 2');
+		#warn if $@;
 	}
+	::measure('new job eval end');
 	$self->job_class->new( $args );
 }
 
@@ -94,15 +99,24 @@ sub new {
 	my %args = @_ == 1 && ref $_[0] ? %{$_[0]} : @_;
 	my %cb;
 	for (keys %args) {
-		$cb{$_} = delete $args{$_} if ref $args{$_} eq 'CODE';
+		$cb{$_} = delete $args{$_} if UNIVERSAL::isa( $args{$_}, 'CODE' );
 	}
-	my $self = bless {
+	my $self = $pkg->next::method(
 		job_class => 'AnyEvent::Queue::Job',
 		encoder   => 'AnyEvent::Queue::Encoder::YAML',
-		current_server => 0,
 		%args,
-	}, $pkg;
-	
+	);
+	$self->reg_cb(%cb);
+	%args = %cb = ();
+	$self;
+}
+
+sub init {
+	my $self = shift;
+	$self->next::method();
+	$self->{servers} = [$self->{servers}] unless ref $self->{servers};
+	$self->{current_server} = 0;
+
 	unless ( $self->job_class->can('new') ) {
 		my $file = join '/', split '::', $self->job_class.'.pm';
 		require $file;
@@ -113,73 +127,35 @@ sub new {
 		require $file;
 		$self->{encoder} = $self->{encoder}->new;
 	}
-	
-	$self->reg_cb(%cb);
-	%args = %cb = ();
-	
-	$self;
 }
 
-sub _connect {
-	my ($self,%args) = @_;
-	
-	#my $cv;$cv = AnyEvent->condvar if $self->{sync};
-	
-	#$self->reg_cb( connected => sub { $cv->send; } ) if $cv;
-	$self->reg_cb( connected => $args{cb} ) if exists $args{cb};
-	$self->eventcan('connected') or croak "connected not handled";
-	$self->{servers} = [$self->{servers}] unless ref $self->{servers};
+sub next_server {
+	my $self = shift;
 	$self->{current_server} = 0 if $self->{current_server} >= @{ $self->{servers} };
 	my ($host,$port) = $self->{servers}[$self->{current_server}++] =~ /([^:]+)(?::(\d+)|)/;
-	$host ||= 'localhost';
-	$port ||= 11212;
-	carp "Connecting to $host:$port" if $self->{debug};
-	my $g;$g = tcp_connect $host, $port, sub {
-		undef $g;
-		my $fh = shift or do {
-			my $e = "$host:$port connect failed: $!";
-			$self->event( error => undef, $e);
-			#warn $e;
-			my @notify;
-			push @notify, $args{cb} if exists $args{cb};
-			push @notify, $self->{current_cb} if defined $self->{current_cb};
-			my %uniq;
-			$_->(undef,$e) for grep {!$uniq{$_}++} @notify;
-			@notify = ();
-			if ($self->{reconnect}) {
-				my $t;$t = AnyEvent->timer( after => 0.1, cb => sub {
-					undef $t;
-					$self->_connect(%args);
-				} );
-			}
-			return;
-		};
-		my ($h,$p) = @_;
-		warn "connected to $h:$p" if $self->{debug};
-		$self->{con} = my $con = AnyEvent::Queue::Conn->new(
-			fh => $fh,
-			debug => defined $self->{debug_proto} ? $self->{debug_proto} : $self->{debug},
-		);
-		$con->reg_cb(
-			error      => sub {
-				delete $self->{con};
-				defined $self->{current_cb} and  $self->{current_cb}->(undef,@_);
-				$self->event( error => @_ );
-				$self->_connect(%args) if $self->{reconnect};
-			},
-			disconnect => sub {
-				#warn "got dis from con";
-				#$SIG{ALRM} = sub { confess "Fuck" };
-				#alarm 2;
-				delete $self->{con};
-				defined $self->{current_cb} and  $self->{current_cb}->(undef,@_);
-				$self->event( disconnect => @_ );
-				$self->_connect(%args) if $self->{reconnect};
-			},
-		);
-		$self->event( connected => $con, "$host:$port" );
-	}, sub { $self->{timeout} };
-	#$cv->recv if $cv;
+	$self->{host} = $host || 'localhost';
+	$self->{port} = $port || 11212;
+}
+
+sub connect {
+	my ($self,%args) = @_;
+	if ($args{cb}) {
+		$self->reg_cb( connected => sb {
+			shift->unreg_me;
+			delete($args{cb})->(@_);
+		} );
+	}
+	$self->next_server();
+	carp "Connecting to $self->{host}:$self->{port}" if $self->{debug};
+	$self->next::method();
+}
+
+sub destroy {
+	my $self = shift;
+	$self->disconnect;
+	%$self = ();
+	undef $self;
+	return;
 }
 
 sub disconnect {
@@ -190,22 +166,63 @@ sub disconnect {
 
 sub watcher {
 	my $self = shift;
-	$self->{sync} and croak "Watcher may not be used in sync mode";
+	if (@_ == 1) {
+		return unless exists $self->{watchers}{$_[0]};
+		return $self->{watchers}{$_[0]};
+	}
 	my %args = @_;
 	my $src = $args{src} || $args{dst} || $args{source};
+	my $use_guard = $args{guard} || 0;
 	my $impl = $args{impl} ? delete $args{impl} : 'AnyEvent::Queue::Watcher';
 	my $file = join '/', split '::', $impl.'.pm';
 	require $file unless $impl->can('new');
+	
+	my $personal = (ref $self)->new(
+		(map { $_ => $self->{$_} } qw( servers timeout encoder job_class )),
+		reconnect => 1,
+		debug => 0,
+	);
 	my $watcher = $impl->new(
 		source => $src,
-		client => $self,
+		client => $personal,
 		%args,
 	);
-	weaken($watcher->{client});
-	#$self->{watcher}{$src} = $watcher;
-	$watcher->run;
-	#print "New watcher: ".findref( $watcher ),"\n";
-	$watcher;
+	%args = ();
+	my $key = $src;
+	#my $key = int $watcher;
+	if (exists $self->{watchers}{$key}) {
+		croak "Already have installed watcher for $key";
+	}
+	$self->{watchers}{$key} = $watcher;
+	undef $personal;
+	weaken( my $w = $watcher );
+	$watcher->{client}->reg_cb(
+		connected => sb {
+			shift->unreg_me;
+			$w or return;
+			warn '('.int($w->{client}).") Personal connected @_";
+			$w->run;
+		},
+	);
+	$watcher->{client}->connect();
+	if (defined wantarray) {
+		if ($use_guard) {
+			# Alternative way of retval
+			undef $watcher;
+			return AnyEvent::Util::guard(sub {
+				$self->{watchers}{$key}->destroy
+					if $self->{watchers}{$key};
+				delete $self->{watchers}{$key};
+			});
+		}
+		else {
+			weaken( $self->{watchers}{$key} );
+			return $watcher;
+		}
+	} else {
+		undef $watcher;
+		return;
+	}
 }
 
 sub eventif {
@@ -225,68 +242,14 @@ sub eventcan {
 	return scalar @{ $self->{__oe_events}{$name} };
 }
 
-#our @WAIT;
-
-sub any_method { # either sync or async
+sub destroy {
 	my $self = shift;
-	my $method = shift;
-	my $cb;
-	my $sync;
-	my @args;
-	warn "any_method";
-	for (@_) {
-		if ($_ and !ref and $_ eq 'cb') {
-			$cb = 1;
-			next;
-		} elsif ($cb and !ref $cb) {
-			$cb = $_;
-			next;
-		} elsif ($_ and !ref and $_ eq 'sync') {
-			$sync = 1;
-			next;
-		} elsif ($sync and !ref $sync) {
-			$sync = \$_;
-			next;
-		} else {
-			push @args, $_;
+	for ( keys %{ $self->{watchers} || {} } ) {
+		if ($self->{watchers}{$_}) {
+			$self->{watchers}{$_}->DESTROY;
 		}
 	}
-	
-	$sync = $sync && ref $sync ? $$sync : $self->{sync};
-
-	my $cv;
-	$cv = AnyEvent->condvar() if $sync;
-	if ($cv) {
-		#push @WAIT, $method;
-		my $old = $cb;
-		$cb = sub {
-			local *__ANON__ = "$method:sync";
-			$cv->send(@_);
-			$old and $old->(@_);
-			undef $cv;
-			@args = ();
-		};
-	}
-	push @args, cb => $cb if $cb;
-	
-	local $self->{current_cb} = $cb if $sync;
-	
-	#warn "Making syncroniuos call to $method" if $cv;
-
-	$cv or $cb or return $self->event( error => undef, "no cb for $method at @{[ (caller)[1,2] ]} [$cb / $cv]" );
-	
-	if ($sync and $self->{con} and $self->{con}{h}{_in_drain}) {
-		warn "Connection handle is in draining. Nested sync calls will lock. Disabling it";
-		$self->{con}{h}{_in_drain} = 0;
-	}
-	$self->$method(@args);
-
-	if ($cv) {
-		my @r = $cv->recv;
-		#pop @WAIT if $WAIT[-1] eq $method;
-		return wantarray ? @r : $r[0] if defined wantarray ;
-		return;
-	}
+	$self->next::method();
 }
 
 1;

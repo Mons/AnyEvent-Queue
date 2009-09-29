@@ -16,7 +16,7 @@ sub register {
 		disconnect => sub {
 			my ($srv,$con) = @_;
 			warn "client disconnected";
-			$server->eventif( reset => $con )
+			$server->event( reset => $con )
 				or warn "reset event not handled";
 		},
 		error => sub {

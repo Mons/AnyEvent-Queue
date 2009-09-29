@@ -3,14 +3,15 @@ package AnyEvent::Queue::Encoder::YAML;
 use Carp;
 use Encode ();
 BEGIN {
-	if( eval{ require YAML::Syck; 1 } ) {
-		$YAML::Syck::ImplicitUnicode = 1;
-		#$YAML::Syck::ImplicitBinary = 1;
-		YAML::Syck->import(qw(Dump Load));
-	}
+	if (0) {}
 	elsif ( eval{ require YAML::XS; 0 } ) {
 		# TODO: unicode?
 		YAML::XS->import(qw(Dump Load));
+	}
+	elsif( eval{ require YAML::Syck; 1 } ) {
+		$YAML::Syck::ImplicitUnicode = 1;
+		#$YAML::Syck::ImplicitBinary = 1;
+		YAML::Syck->import(qw(Dump Load));
 	}
 	elsif ( eval{ require YAML; 1 } ) {
 		carp "YAML is slow. It's better to install YAML::Syck or YAML::XS";

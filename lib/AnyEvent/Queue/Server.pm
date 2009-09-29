@@ -2,11 +2,13 @@ package AnyEvent::Queue::Server;
 
 use strict;
 use Class::C3;
+use Object::Event 1.101;
 use base 'Object::Event';
 use AnyEvent::Handle;
 use AnyEvent::Socket;
 
-use AnyEvent::Queue::Conn;
+#use AnyEvent::Queue::Conn;
+use AnyEvent::Connection::Raw;
 
 use Data::Dumper;
 use Carp;
@@ -80,7 +82,12 @@ sub start {
 sub accept_connection {
 	my ($self,$fh,@args) = @_;
 	print "Client connected @args\n";
-	my $con = AnyEvent::Queue::Conn->new( fh => $fh );
+	my $con = AnyEvent::Connection::Raw->new(
+		fh    => $fh,
+		side  => 'server',
+		#timeout => ?,
+		debug => $self->{debug},
+	);
 	$self->{c}{int $con} = $con;
 	$con->reg_cb(
 		disconnect => sub {
@@ -114,7 +121,7 @@ sub eventcan {
 
 sub handle {
 	my ($self,$con, $cmd, @args ) = @_;
-	$self->eventif( $cmd => $con, @args )
+	$self->event( $cmd => $con, @args )
 		or do {
 			$con->reply("NOT SUPPORTED");
 			warn "$cmd event not handled";

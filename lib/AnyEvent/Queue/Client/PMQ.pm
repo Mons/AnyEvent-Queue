@@ -83,12 +83,13 @@ sub _add {
 
 sub _recv_job {
 	my $self = shift;
+	::measure('take begin');
 	my $command = shift;
 	my $src = shift;
 	my %args = @_;
 
-	$args{cb} or return $self->event( error => "no cb for take at @{[ (caller)[1,2] ]}" );
-	$self->{con} or return $args{cb}->(undef, "Not connected");
+	$args{cb} or return $self->event( error => "no cb for take at @{[ (caller)[1,2] ]}" ),%args=();
+	$self->{con} or return (delete $args{cb})->(undef, "Not connected"),%args = ();
 	$self->{con}->command($command, cb => sub {
 		local $_ = shift;
 		if (/^(?:TAKEN|PEEKED)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/) {
@@ -102,11 +103,15 @@ sub _recv_job {
 						src => $src,
 						data => $data,
 					});
-				$args{cb}->($job);
+				$self->{taken}{$src}{$id}++;
+				::measure('take end');
+				$args{cb}($job);
+				%args = ();
 			});
 		} else {
 			local $@ = $_;
-			$args{cb}->(undef, $_);
+			$args{cb}(undef, $_);
+			%args = ();
 		}
 	});
 }
@@ -132,7 +137,7 @@ sub _give_back {
 	my $cmd = shift;
 	my %args = @_;
 	
-	$args{cb} or return $self->event( error => "no cb for $cmd at @{[ (caller)[1,2] ]}" );
+	$args{cb} or %args=(),return $self->event( error => "no cb for $cmd at @{[ (caller)[1,2] ]}" );
 
 	my ($id,$dst,$pri,$delay);
 	if ($args{job}) {
@@ -150,10 +155,12 @@ sub _give_back {
 	$delay = $args{delay} if exists $args{delay}; # argument have priority over job
 	$delay = 0 unless defined $delay;
 
-	$self->{con} or return $args{cb}->(undef, "Not connected");
+	$self->{con} or return $args{cb}(undef, "Not connected"),%args=();
 	$self->{con}->command("$cmd $dst $id".($cmd eq 'delete' ? '' : " $delay"), cb => sub {
 		local $_ = shift;
 		if (/^OK\s*$/) {
+			delete $self->{taken}{$dst}{$id};
+			delete $self->{taken}{$dst} unless %{$self->{taken}{$dst}};
 			$args{cb}($id);
 		}
 		elsif(/^NOT_FOUND\s*$/) {
@@ -164,6 +171,7 @@ sub _give_back {
 			local $@ = $_;
 			$args{cb}->(undef, $_);
 		}
+		%args = ();
 	});
 	
 }
@@ -172,7 +180,6 @@ sub _requeue { shift->_give_back('requeue', @_) }
 sub _release { shift->_give_back('release', @_) }
 sub _ack     { shift->_give_back('ack',     @_) }
 sub _bury    { shift->_give_back('bury',    @_) }
-
 sub _delete  { shift->_give_back('delete',   @_) }
 
 sub _stats {
@@ -195,7 +202,7 @@ sub _stats {
 					$self->event( error => undef, "Failed to decode data: $@", $data );
 					$args{cb}->(undef, "Failed to decode data: $@",$data);
 				} else {
-					warn "Received stats for ".($q ? $q : '<all>').":". Dumper($deco);
+					#warn "Received stats for ".($q ? $q : '<all>').":". Dumper($deco);
 					if (!defined $deco->{total}) {
 						$deco->{total} = 0;
 						$deco->{total} += $deco->{$_} for qw( active buried );
@@ -338,8 +345,13 @@ sub _queues {
 	$args{cb} or return $self->event( error => "no cb for queues at @{[ (caller)[1,2] ]}" );
 	
 	$self->_stats(cb => sub {
-		my $stats = shift or return $args{cb}->(undef,@_);
-		$args{cb}->($stats->{queues});
+		if (my $stats = shift) {
+			$args{cb}($stats->{queues});
+		} else {
+			$args{cb}->(undef,@_)
+		}
+		#%args = ();
+		return;
 	});
 }
 
