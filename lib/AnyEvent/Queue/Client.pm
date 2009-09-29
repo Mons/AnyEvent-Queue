@@ -24,11 +24,7 @@ use Scalar::Util qw(weaken);
 use Data::Dumper;
 
 use R::Dump;
-use Devel::FindRef;
-use Devel::Refcount qw( refcount );
 use AnyEvent::cb;
-sub findref;
-*findref = \&Devel::FindRef::track;
 
 =head1 INTERFACE
 

@@ -5,16 +5,13 @@ use base 'Object::Event';
 use Data::Dumper;
 use Carp;
 use R::Dump;
-
 use Time::HiRes qw(time);
-
-use Devel::FindRef;
 use Scalar::Util qw(weaken isweak);
-use Devel::Refcount qw( refcount );
+
 use AnyEvent::cb;
-sub findref;
-*findref = \&Devel::FindRef::track;
 use constant::def DEBUG => 0;
+
+BEGIN { eval { require Devel::Refcount; *refcount = \&Devel::Refcount::refcount; 1 } or *refcount = sub { -1 }; }
 
 sub after (&$)    { my $cb = shift; my $t;$t = AnyEvent->timer( after=> $_[0], cb => sub { undef $t; goto &$cb });return; }
 
@@ -43,61 +40,9 @@ sub new {
 	$self->{taken}{count} = 0;
 	$self->{taking} = 0; # currently in progress
 	$self->{nomore} = 0;
-	$self->reg_cbs(%cb);
+	$self->reg_cb(%cb);
 	%args = %cb = ();
 	$self;
-}
-
-sub reg_cbs {
-	shift->reg_cb(
-		@_,
-		_taken => sub {
-			weaken(my $self = shift);
-			#my $self = shift;
-			{
-				#my $x = shift;
-				#warn "_taken refcount = ".refcount($x);
-				#undef $x;
-				1
-			}
-			#my $client = shift;
-			my $job = shift;
-			$self or warn("Destroyed _taken"),return <>;
-			#warn "taken $self ".($job ? $job->id : '-1').' ~ '.refcount($self);
-			$self->{taking}--;
-			if ($job) {
-				$self->{nomore} = 0;
-				#warn "count $self->{taken}{count} + 1";
-				$self->{taken}{count}++;
-				$self->{taken}{ $job->src }{ $job->id } = $job;
-				push @{ $self->{rps}{_} },time if $self->{rps};
-				$self->event( job => $job ) or warn "!!! job cb not handled";
-				if ( $self->{curfetch} < $self->{prefetch} ) {
-					warn "Raise curfetch $self->{curfetch}+1";
-					$self->{curfetch}++;
-					$self->_loop;
-				};
-			} else {
-				$self->{nomore}++ or $self->event( nomore => () ) or warn "nomore not handled";
-				$self->{curfetch} = 1 if $self->{curfetch} > 1;
-				unless ($self->{stopping}) {
-					#warn "(".int($self)." : ".refcount($self).") not stopping, want more after delay ($self->{taking}/$self->{curfetch}).";
-					$self->{client}->after( 0.3, sb {
-						$self or return;
-						$self->_loop;
-						undef $self;
-					});
-				} else {
-					# check for termination
-					$self->{client}->after( 0.0000001, sb {
-						$self->_loop;
-					});
-					#$self->_run;
-				}
-			}
-		},
-	);
-	return;
 }
 
 sub _loop {
@@ -135,18 +80,18 @@ sub _loop {
 						$self->take;
 					});
 				} else {
-					warn "non-delayed take $self ".refcount($self);
+					#warn "non-delayed take $self ".refcount($self);
 						$self or warn("No self"),return;
 						$self->{taking}++;
 						::measure('watcher loop after in 2');
 						$self->take;
 						return;
-					$self->{client}->after( 0.0000001, sb {
-						$self or warn("No self"),return;
-						$self->{taking}++;
-						::measure('watcher loop after in 3');
-						$self->take;
-					});
+					#$self->{client}->after( 0.0000001, sb {
+					#	$self or warn("No self"),return;
+					#	$self->{taking}++;
+					#	::measure('watcher loop after in 3');
+					#	$self->take;
+					#});
 				}
 			}
 			::measure('watcher loop out');
@@ -164,7 +109,7 @@ sub _next {
 			return $self->_loop if $self->{stopping};
 			if ($self->{rate}) {
 				my ($rps,$wait) = $self->rps($self->{curfetch});
-				warn "rated $self->{rate} take: wait $wait";
+				#warn "rated $self->{rate} take: wait $wait";
 				$self->{taking}++;
 				if ($wait) {
 					$self->{client}->after( $wait, sb {
@@ -186,8 +131,8 @@ sub _next {
 				$self->{taking}++;
 				# TODO: WTF?
 				warn "taking while stopping" if $self->{stopping};
-				$self->take; # leaks
-				#$self->maybe_take; # not leaks.
+				#$self->take;
+				$self->maybe_take;
 			}
 	return;
 }
@@ -218,7 +163,7 @@ sub take {
 				push @{ $self->{rps}{_} },time if $self->{rps};
 				$self->event( job => $job ) or warn "!!! job cb not handled";
 				if ( $self->{curfetch} < $self->{prefetch} ) {
-					warn "Raise curfetch $self->{curfetch}+1";
+					#warn "Raise curfetch $self->{curfetch}+1";
 					$self->{curfetch}++;
 					$self->_loop;
 				}
@@ -475,7 +420,6 @@ sub DESTROY {
 	%$self = ();
 	if ($w) {
 		warn "Not cleaned watcher client ".refcount($w);
-		print findref $w, 20;
 	}
 	return;
 }
