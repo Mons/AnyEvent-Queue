@@ -30,6 +30,13 @@ sub new {
 		rate     => 0, # fetch using rate limit
 		%args,
 	}, $pk;
+	$self->reg_cb(%cb);
+	%args = %cb = ();
+	$self;
+}
+
+sub reset {
+	my $self = shift;
 	if ($self->{rate}) {
 		$self->{rps}{_} = [];
 		$self->{rps}{max} = 20/$self->{rate};
@@ -40,100 +47,100 @@ sub new {
 	$self->{taken}{count} = 0;
 	$self->{taking} = 0; # currently in progress
 	$self->{nomore} = 0;
-	$self->reg_cb(%cb);
-	%args = %cb = ();
-	$self;
 }
 
+
 sub _loop {
-			weaken(my $self = shift);
-			::measure('watcher loop in');
-			#weaken(my $x = shift);
-			#$self->_run
-			#weaken($self) unless isweak($self);
-			#warn "run $self | ".refcount($self);
-			if ($self->{stopping}) {
-				if (!$self->{taking} and !$self->{taken}{count}) {
-					$self->{stopped} = 1;
-					my $cb = delete $self->{stopping};
-					$cb->();
-				}
-				return;
-			}
-			return if $self->{taking} + $self->{taken}{count} > $self->{curfetch};
-			my $delay = 0;
-			# Distribute "parralel" takers evenly
-			if ($self->{rate}) {
-				(undef,$delay) = $self->rps(1); # concurrency here = 1, we need minimal delay
-			} else {
-				#$delay = 0.0001;
-			}
-			for (($self->{taken}{count} + $self->{taking} + 1)..$self->{curfetch}) {
-				my $cdelay = $delay * ($_ - $self->{taken}{count} - 1);
-				if ($cdelay) {
-					warn "take after $cdelay";
-					$self->{client}->after( $cdelay, sb {
-						$self or return;
-						return if $self->{taking} + $self->{taken}{count} >= $self->{curfetch};
-						$self->{taking}++;
-						::measure('watcher loop after in 1');
-						$self->take;
-					});
-				} else {
-					#warn "non-delayed take $self ".refcount($self);
-						$self or warn("No self"),return;
-						$self->{taking}++;
-						::measure('watcher loop after in 2');
-						$self->take;
-						return;
-					#$self->{client}->after( 0.0000001, sb {
-					#	$self or warn("No self"),return;
-					#	$self->{taking}++;
-					#	::measure('watcher loop after in 3');
-					#	$self->take;
-					#});
-				}
-			}
-			::measure('watcher loop out');
+	weaken(my $self = shift);
+	#warn "watcher loop $self->{taking} + $self->{taken}{count} cmp $self->{curfetch}";
+	::measure('watcher loop in');
+	#weaken(my $x = shift);
+	#$self->_run
+	#weaken($self) unless isweak($self);
+	#warn "run $self | ".refcount($self);
+	if ($self->{stopping}) {
+		if (!$self->{taking} and !$self->{taken}{count}) {
+			$self->{stopped} = 1;
+			my $cb = delete $self->{stopping};
+			$cb->();
+		} else {
+			#warn "stopping, but have $self->{taking}+$self->{taken}{count}";
+		}
+		return;
+	}
+	return if $self->{taking} + $self->{taken}{count} > $self->{curfetch};
+	my $delay = 0;
+	# Distribute "parralel" takers evenly
+	if ($self->{rate}) {
+		(undef,$delay) = $self->rps(1); # concurrency here = 1, we need minimal delay
+	} else {
+		#$delay = 0.0001;
+	}
+	for (($self->{taken}{count} + $self->{taking} + 1)..$self->{curfetch}) {
+		my $cdelay = $delay * ($_ - $self->{taken}{count} - 1);
+		if ($cdelay) {
+			#warn "take after $cdelay";
+			$self->{client}->after( $cdelay, sb {
+				$self or return;
+				return if $self->{taking} + $self->{taken}{count} >= $self->{curfetch};
+				$self->{taking}++;
+				::measure('watcher loop after in 1');
+				$self->take;
+			});
+		} else {
+			#warn "non-delayed take $self ".refcount($self);
+			$self->{taking}++;
+			::measure('watcher loop after in 2');
+			$self->take;
 			return;
+			#$self->{client}->after( 0.0000001, sb {
+			#	$self or warn("No self"),return;
+			#	$self->{taking}++;
+			#	::measure('watcher loop after in 3');
+			#	$self->take;
+			#});
+		}
+	}
+	::measure('watcher loop out');
+	return;
 	
 }
 
 sub _next {
-			weaken(my $self = shift);
-			#my $self = shift;
-			unless ($self) {
-				warn "Destroyed during next";
-				return;
-			}
-			return $self->_loop if $self->{stopping};
-			if ($self->{rate}) {
-				my ($rps,$wait) = $self->rps($self->{curfetch});
-				#warn "rated $self->{rate} take: wait $wait";
-				$self->{taking}++;
-				if ($wait) {
-					$self->{client}->after( $wait, sb {
-						$self and $self->maybe_take;
-					});
-				} else {
-					$self->take;
-				}
-			}
-			elsif ($self->{delay}) {
-				warn "release with self.delay $self->{delay}";
-				$self->{taking}++;
-				$self->{client}->after( $self->{delay}, sb {
-					$self and $self->maybe_take;
-				});
-			}
-			else {
-				#warn "seq take";
-				$self->{taking}++;
-				# TODO: WTF?
-				warn "taking while stopping" if $self->{stopping};
-				#$self->take;
-				$self->maybe_take;
-			}
+	weaken(my $self = shift);
+	#my $self = shift;
+	unless ($self) {
+		warn "Destroyed during next";
+		return;
+	}
+	return $self->_loop if $self->{stopping};
+	if ($self->{rate}) {
+		my ($rps,$wait) = $self->rps($self->{curfetch});
+		#warn "rated $self->{rate} take: wait $wait";
+		$self->{taking}++;
+		if ($wait) {
+			$self->{client}->after( $wait, sb {
+				$self and $self->maybe_take;
+			});
+		} else {
+			$self->take;
+		}
+	}
+	elsif ($self->{delay}) {
+		warn "release with self.delay $self->{delay}";
+		$self->{taking}++;
+		$self->{client}->after( $self->{delay}, sb {
+			$self and $self->maybe_take;
+		});
+	}
+	else {
+		#warn "seq take";
+		$self->{taking}++;
+		# TODO: WTF?
+		warn "taking while stopping" if $self->{stopping};
+		#$self->take;
+		$self->maybe_take;
+	}
 	return;
 }
 
@@ -149,6 +156,8 @@ sub take {
 			my ($j,$e) = @_;
 			::measure('watcher taken');
 			#refcount($self) == 1 and warn "Refcnt = 1 object ready to destroy";
+			#warn "_take(@_)";
+			$self->{taking}--;
 			if (my $job = shift) {
 				$client or warn("No client"),return;
 				unless($self) {
@@ -156,7 +165,6 @@ sub take {
 					$client->release(job => $j);
 					return;
 				};
-				$self->{taking}--;
 				$self->{nomore} = 0;
 				$self->{taken}{count}++;
 				$self->{taken}{ $job->src }{ $job->id } = $job;
@@ -170,15 +178,17 @@ sub take {
 				return;
 			}
 			elsif (my $err = shift) {
+				#warn "Fail $err";
 				if ($err eq 'NO JOBS') {
 					$self->{nomore}++ or $self->event( nomore => () ) or warn "nomore not handled";
 					$self->{curfetch} = 1 if $self->{curfetch} > 1;
 					unless ($self->{stopping}) {
 						#warn "(".int($self)." : ".refcount($self).") not stopping, want more after delay ($self->{taking}/$self->{curfetch}).";
+						#warn "no more, delay loop";
 						$self->{client}->after( 0.3, sb {
 							$self or return;
+							#warn "delayed loop";
 							$self->_loop;
-							undef $self;
 						});
 					} else {
 						# check for termination
@@ -189,7 +199,11 @@ sub take {
 					}
 					return;
 				} else {
-					die "Take failed: @_";
+					warn "Take failed: $err";
+					$self->{client}->after(0.1, sb {
+						$self->{taking}++;
+						$self->maybe_take;
+					});
 				}
 			}
 			else {
@@ -285,114 +299,45 @@ sub run {
 		$self->{stopped} = 0;
 		undef $self->{stopping};
 	}
+	$self->reset;
 	$self->_loop;
 	return;
 }
 
-
-sub release {
+sub _back {
 	weaken( my $self = shift );
+	my $op = shift;
 	my %args = @_;
-	my $job = $args{job};
-	$self->{client} or return $args{cb}(undef,"No client");
-	$self->{client}->release(
-		%args,
-		cb => sub {
-			local *__ANON__ = 'release.cb';
-			if (my $id = shift) {
-				delete $self->{taken}{$job->{src}}{$job->{id}};
-			} else {
-				warn "release $job->{src}.$job->{id} failed: @_" if @_;
-			}
-			eval{ $args{cb}->(@_) if $args{cb}; 1 } or carp "cb failed: $@";
-			%args = ();
-			$self->{taken}{count}--;
-			$self->_next;
-		}
-	);
-}
-
-sub requeue {
-	weaken( my $self = shift );
-	#my $self = shift;
-	my %args = @_;
-	#$args{cb} ||= sub {%args = ()};
 	my $job = $args{job};
 	$self->{client} or return $args{cb}(undef,"No client"),%args = ();
 	my $taken = $self->{taken};
 	weaken( $self->{waitingcb}{int $args{cb}} = $args{cb} ) if $args{cb};
-	$self->{client}->requeue(
+	$self->{client}->$op(
 		@_,
 		cb => sb {
-			local *__ANON__ = 'requeue.cb';
-			#warn "count $taken->{count} - 1";
+			local *__ANON__ = $op.'.cb';
 			$taken->{count}--;
-			#warn "$self --$args{job}{id}";
 			delete $taken->{$job->{src}}{$job->{id}};
 			undef $taken;
+			$_[0] and @_ > 1 and warn "$op $job->{src}.$job->{id} failed: @_[1..$#_]";
 			if ($self) {
-				if (my $id = $_[0]) {
-					
-				} else {
-					warn "requeue $job->{src}.$job->{id} failed: @_[1..$#_]" if @_;
-				}
 				delete $self->{waitingcb}{int $args{cb}} if $args{cb};
-				eval{ delete($args{cb})->(@_) if $args{cb}; 1 } or carp "cb failed: $@";
+				eval{ delete($args{cb})->(@_) if $args{cb}; 1 } or carp "$op cb failed: $@";
 				%args = ();
 				$self->_next;
 			} else {
 				warn "requeued with destroyed";
-				eval{ delete($args{cb})->(@_) if $args{cb}; 1 } or carp "cb failed: $@";
+				eval{ delete($args{cb})->(@_) if $args{cb}; 1 } or carp "$op cb failed: $@";
 				%args = ();
 			}
-			undef $self;
+			#undef $self;
 		},
 	);
 }
-
-sub ack {
-	my $self = shift;
-	my %args = @_;
-	my $job = $args{job};
-	$self->{client} or return $args{cb}->(undef,"No client");
-	$self->{client}->ack( 
-		%args,
-		cb => sub {
-			local *__ANON__ = 'ack.cb';
-			if (my $id = shift) {
-				delete $self->{taken}{$job->{src}}{$job->{id}};
-			} else {
-				warn "ack $job->{src}.$job->{id} failed: @_" if @_;
-			}
-			eval{ $args{cb}->(@_) if $args{cb}; 1 } or carp "cb failed: $@";
-			%args = ();
-			$self->{taken}{count}--;
-			$self->_next;
-		}
-	);
-}
-
-sub bury {
-	my $self = shift;
-	my %args = @_;
-	my $job = $args{job};
-	$self->{client} or return $args{cb}->(undef,"No client");
-	$self->{client}->bury( 
-		%args,
-		cb => sub {
-			local *__ANON__ = 'bury.cb';
-			if (my $id = shift) {
-				delete $self->{taken}{$job->{src}}{$job->{id}};
-			} else {
-				warn "bury $job->{src}.$job->{id} failed: @_" if @_;
-			}
-			eval{ $args{cb}->(@_) if $args{cb}; 1 } or carp "cb failed: $@";
-			%args = ();
-			$self->{taken}{count}--;
-			$self->_next;
-		}
-	);
-}
+sub ack     { shift->_back( ack => @_ ) }
+sub requeue { shift->_back( requeue => @_ ) }
+sub release { shift->_back( release => @_ ) }
+sub bury    { shift->_back( bury => @_ ) }
 
 sub taken_keys {
 	my $self = shift;
