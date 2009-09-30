@@ -39,8 +39,9 @@ sub new {
 	weaken(my $me = $self);
 	$me->reg_cb(connected => sub {
 		$me or return;
+		#warn "Reset BT state";
 		$me->{state}{watching} = 1;
-		$me->{state}{watch}{default}++;
+		$me->{state}{watch} = { default => 1 };
 		$me->{state}{use} = 'default';
 	});
 	$self;
@@ -113,7 +114,7 @@ sub _recv_job {
 
 	$args{cb} or return $self->event( error => "no cb for take at @{[ (caller)[1,2] ]}" );
 	$self->{con}->command($command, cb => sub {
-		local $_ = shift;
+		defined( local $_ = shift ) or return $args{cb}(undef,@_);
 		if (/^(?:TAKEN|PEEKED)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/) {
 			my ($id,$len,$pri) = ($1,$2,$3);
 			$self->{con}->recv( $len, cb => sub {
@@ -199,7 +200,7 @@ sub _give_back {
 
 	#warn "Sending request | cb = $args{cb}";
 	$self->{con}->command("$cmd $id$args{add}", cb => sub {
-		local $_ = shift;
+		defined( local $_ = shift ) or return $args{cb}(undef,@_);
 		if (/^OK\s*$/) {
 			$args{cb}->(1);
 		} else {
@@ -254,8 +255,7 @@ sub _stats {
 	$args{cb} or return $self->event( error => "no cb for stats at @{[ (caller)[1,2] ]}" );
 	$self->{con} or return $args{cb}->(undef, "Not connected");
 	$self->{con}->command($cmd, cb => sub {
-		local $_ = shift;
-		defined or return $args{cb}(undef, @_);
+		defined( local $_ = shift ) or return $args{cb}(undef,@_);
 		if (/^OK\s+(\d+)\s*$/) {
 			my ($len) = ($1);
 			$self->{con}->recv( $len, cb => sub {
@@ -350,7 +350,7 @@ sub _queues {
 	$args{cb} or return $self->event( error => "no cb for queues at @{[ (caller)[1,2] ]}" );
 	$self->{con} or return $args{cb}->(undef, "Not connected");
 	$self->{con}->command("list-tubes", cb => sub {
-		local $_ = shift;
+		defined( local $_ = shift ) or return $args{cb}(undef,@_);
 		if (/^OK\s+(\d+)\s*$/) {
 			my ($len) = ($1);
 			$self->{con}->recv( $len, cb => sub {
@@ -404,7 +404,7 @@ sub __use {
 	my $cb = shift;
 	return $cb->(1) if $self->{state}{use} eq $dst;
 	$self->{con}->command("use $dst", cb => sub {
-		local $_ = shift;
+		defined( local $_ = shift ) or return $cb->(undef,@_);
 		if (/USING \Q$dst\E/) {
 			$self->{state}{use} = $dst;
 			$cb->(1);
@@ -431,7 +431,7 @@ sub __put {
 	#warn ">> put $pri $delay $ttr $length  ";
 
 	$self->{con}->command("put $pri $delay $ttr $length$NL$data", cb => sub {
-		local $_ = shift;
+		defined( local $_ = shift ) or return $cb->(undef,@_);
 		#warn "<< $_  ";
 		if (/INSERTED (\d+)/) {
 			my $id = $1;
@@ -459,7 +459,7 @@ sub __reserve {
 	my $cb = shift;
 	::measure('bt __reserve begin');
 	$self->{con}->command("reserve-with-timeout 1", cb => sub {
-		local $_ = shift;
+		defined( local $_ = shift ) or return $cb->(undef,@_);
 		if (/RESERVED (\d+) (\d+)/) {
 			my ($job,$size) = ($1,$2);
 			::measure('bt __reserve ok, reading');
@@ -485,7 +485,7 @@ sub __reserve {
 			undef $cb;
 		}
 		else {
-			warn "reserve failed: $_";
+			warn "reserve failed: $_ / @_";
 			$cb->(undef, $_);
 			undef $cb;
 		}
@@ -497,7 +497,7 @@ sub __delete {
 	my $id = shift;
 	my $cb = shift;
 	$self->{con}->command("delete $id", cb => sub {
-		local $_ = shift;
+		defined( local $_ = shift ) or return $cb->(undef,@_);
 		if (/DELETED/) {
 			$cb->(1);
 		}
@@ -520,7 +520,7 @@ sub __release {
 	$delay ||= 0;
 	$pri ||= DEFPRI;
 	$self->{con}->command("release $id $pri $delay", cb => sub {
-		local $_ = shift;
+		defined( local $_ = shift ) or return $cb->(undef,@_);
 		if (/^RELEASED\s*$/) {
 			$cb->('released');
 		}
@@ -543,7 +543,7 @@ sub __bury {
 	my ($id,$pri) = @_;
 	$pri ||= DEFPRI;
 	$self->{con}->command("bury $id $pri", cb => sub {
-		local $_ = shift;
+		defined( local $_ = shift ) or return $cb->(undef,@_);
 		if (/^BURIED\s*$/) {
 			$cb->(1);
 		}
@@ -563,7 +563,7 @@ sub __watch {
 	my $cb = shift;
 	return $cb->(1) if $self->{state}{watch}{$dst};
 	$self->{con}->command("watch $dst", cb => sub {
-		local $_ = shift;
+		defined( local $_ = shift ) or return $cb->(undef,@_);
 		#diag "<< watch $queue: $_";
 		if (/WATCHING (\d+)/) {
 			$self->{state}{watching} = $1;
@@ -580,7 +580,7 @@ sub __ping {
 	my $self = shift;
 	my $cb = shift;
 	$self->{con}->command("ping", cb => sub {
-		local $_ = shift;
+		defined( local $_ = shift ) or return $cb->(undef,@_);
 		defined or return $cb->(undef,@_);
 		#diag "<< ping: $_";
 		if (/UNKNOWN_COMMAND/) {
@@ -598,7 +598,7 @@ sub __ignore {
 	my $dst = shift;
 	my $cb = shift;
 	$self->{con}->command("ignore $dst", cb => sub {
-		local $_ = shift;
+		defined( local $_ = shift ) or return $cb->(undef,@_);
 		if (/NOT_IGNORED/) {
 			$cb->(0) if $cb;
 		}

@@ -58,8 +58,8 @@ sub _add {
 	my $id = exists $args{id} ? $args{id} : '';
 	$self->{con} or return $args{cb}->(undef, "Not connected");
 	$self->{con}->command("$cmd $dst $pri $length $delay $id\r\n$data", cb => sub {
-		local $_ = shift;
-		if (/^INSERTED\s+(\d+)$/) {
+		defined( local $_ = shift ) or return $args{cb}(undef,@_);
+		if ($_ and /^INSERTED\s+(\d+)$/) {
 			my $job = $self->job({
 				id  => $1,
 				pri => $pri,
@@ -91,8 +91,8 @@ sub _recv_job {
 	$args{cb} or return $self->event( error => "no cb for take at @{[ (caller)[1,2] ]}" ),%args=();
 	$self->{con} or return (delete $args{cb})->(undef, "Not connected"),%args = ();
 	$self->{con}->command($command, cb => sub {
-		local $_ = shift;
-		if (/^(?:TAKEN|PEEKED)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/) {
+		defined( local $_ = shift ) or return $args{cb}(undef,@_);
+		if ($_ and /^(?:TAKEN|PEEKED)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/) {
 			my ($id,$len,$pri) = ($1,$2,$3);
 			$self->{con}->recv( $len, cb => sub {
 				my $data = shift;
@@ -157,7 +157,7 @@ sub _give_back {
 
 	$self->{con} or return $args{cb}(undef, "Not connected"),%args=();
 	$self->{con}->command("$cmd $dst $id".($cmd eq 'delete' ? '' : " $delay"), cb => sub {
-		local $_ = shift;
+		defined( local $_ = shift ) or return $args{cb}(undef,@_);
 		if (/^OK\s*$/) {
 			delete $self->{taken}{$dst}{$id};
 			delete $self->{taken}{$dst} unless %{$self->{taken}{$dst}};
@@ -191,7 +191,7 @@ sub _stats {
 	$args{cb} or return $self->event( error => "no cb for stats at @{[ (caller)[1,2] ]}" );
 	$self->{con} or return $args{cb}->(undef, "Not connected");
 	$self->{con}->command($cmd, cb => sub {
-		local $_ = shift;
+		defined( local $_ = shift ) or return $args{cb}(undef,@_);
 		if (/^STATS\s+(\d+)\s*$/) {
 			my ($len) = ($1);
 			$self->{con}->recv( $len, cb => sub {
@@ -205,7 +205,7 @@ sub _stats {
 					#warn "Received stats for ".($q ? $q : '<all>').":". Dumper($deco);
 					if (!defined $deco->{total}) {
 						$deco->{total} = 0;
-						$deco->{total} += $deco->{$_} for qw( active buried );
+						$deco->{total} += $deco->{$_}||0 for qw( active buried );
 					}
 					$args{cb}->($deco);
 				}
@@ -225,7 +225,7 @@ sub _fullstats {
 	$args{cb} or return $self->event( error => "no cb for $cmd at @{[ (caller)[1,2] ]}" );
 	$self->{con} or return $args{cb}->(undef, "Not connected");
 	$self->{con}->command($cmd, cb => sub {
-		local $_ = shift;
+		defined( local $_ = shift ) or return $args{cb}(undef,@_);
 		if (/^FULLSTATS\s+(\d+)\s*$/) {
 			my ($len) = ($1);
 			$self->{con}->recv( $len, cb => sub {
@@ -286,7 +286,7 @@ sub _update {
 
 	$self->{con} or return $args{cb}->(undef, "Not connected");
 	$self->{con}->command("update $dst $id $pri $length $delay\r\n$data", cb => sub {
-		local $_ = shift;
+		defined( local $_ = shift ) or return $args{cb}(undef,@_);
 		if (/^OK\s*$/) {
 			$args{cb}(1);
 		}
@@ -310,7 +310,7 @@ sub _create {
 	defined $dst or confess "Required queue argument";
 	$self->{con} or return $args{cb}->(undef, "Not connected");
 	$self->{con}->command("create $dst", cb => sub {
-		local $_ = shift;
+		defined( local $_ = shift ) or return $args{cb}(undef,@_);
 		if (/^OK\s+(\S+)\s*$/) {
 			$args{cb}->(1,lc $1);
 		} else {
@@ -328,7 +328,7 @@ sub _drop {
 	defined $dst or confess "Required queue argument";
 	$self->{con} or return $args{cb}->(undef, "Not connected");
 	$self->{con}->command("drop $dst", cb => sub {
-		local $_ = shift;
+		defined( local $_ = shift ) or return $args{cb}(undef,@_);
 		if (/^OK\s+(\d+)\s*$/) {
 			my $count = $1 || '0E0';
 			$args{cb}->($count);
