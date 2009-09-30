@@ -30,7 +30,7 @@ use AnyEvent::cb;
 
 =cut
 
-sub ready          { shift->{connected} ? 1 : 0 } # is queue connected?
+sub ready          { $_[0]->{connected} && $_[0]->{con}{h} ? 1 : 0 } # is queue connected?
 
 sub ping           { shift->_ping( @_ ) };
 
@@ -67,7 +67,6 @@ sub job {
 	#warn "New job".Dumper(\@_);
 	my $args = shift;
 	::measure('new job');
-	return $self->job_class->new( $args );
 	eval {
 		my $data = $self->{encoder}->decode($args->{data});
 		#warn "data = $args->{data} ".Dump($data);
@@ -97,6 +96,7 @@ sub new {
 	for (keys %args) {
 		$cb{$_} = delete $args{$_} if UNIVERSAL::isa( $args{$_}, 'CODE' );
 	}
+	$args{sync} and croak "sync methods was deprecated";
 	my $self = $pkg->next::method(
 		job_class => 'AnyEvent::Queue::Job',
 		encoder   => 'AnyEvent::Queue::Encoder::YAML',
@@ -149,6 +149,11 @@ sub connect {
 sub destroy {
 	my $self = shift;
 	$self->disconnect;
+	for ( keys %{ $self->{watchers} || {} } ) {
+		if ($self->{watchers}{$_}) {
+			$self->{watchers}{$_}->destroy;
+		}
+	}
 	%$self = ();
 	undef $self;
 	return;
@@ -194,9 +199,9 @@ sub watcher {
 	weaken( my $w = $watcher );
 	$watcher->{client}->reg_cb(
 		connected => sb {
-			shift->unreg_me;
+			#shift->unreg_me;
 			$w or return;
-			warn '('.int($w->{client}).") Personal connected @_";
+			#warn '('.int($w->{client}).") Personal connected @_";
 			$w->run;
 		},
 	);
@@ -220,7 +225,7 @@ sub watcher {
 		return;
 	}
 }
-
+=for rem
 sub eventif {
 	#my ($self,$name) = @_;
 	my $self = shift;my $name = shift;
@@ -237,15 +242,5 @@ sub eventcan {
 	return undef unless exists $self->{__oe_events}{$name};
 	return scalar @{ $self->{__oe_events}{$name} };
 }
-
-sub destroy {
-	my $self = shift;
-	for ( keys %{ $self->{watchers} || {} } ) {
-		if ($self->{watchers}{$_}) {
-			$self->{watchers}{$_}->DESTROY;
-		}
-	}
-	$self->next::method();
-}
-
+=cut
 1;
