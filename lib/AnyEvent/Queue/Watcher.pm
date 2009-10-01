@@ -352,7 +352,7 @@ sub destroy {
 sub AnyEvent::Queue::Watcher::destroyed::AUTOLOAD {}
 sub DESTROY {
 	my $self = shift;
-	warn "(".int($self).") Destroying watcher";
+	warn "(".int($self).") Destroying watcher $self->{source}";
 	for my $k (keys %{ $self->{waitingcb} || {} }) {
 		if ($self->{waitingcb}{$k}) {
 			delete($self->{waitingcb}{$k})->(undef, "Watcher destroyed");
