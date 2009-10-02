@@ -360,6 +360,9 @@ sub DESTROY {
 			delete $self->{waitingcb}{$k};
 		}
 	}
+	if ($self->{stopping}) {
+		eval{ delete($self->{stopping})->(); };warn if $@;
+	}
 	$self->{client} and $self->{client}->destroy;
 	weaken( my $w = $self->{client} );
 	%$self = ();
