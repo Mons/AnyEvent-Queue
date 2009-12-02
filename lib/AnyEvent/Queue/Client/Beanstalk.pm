@@ -8,6 +8,8 @@ use Scalar::Util qw(weaken);
 
 use AnyEvent::Queue::Encoder::YAML;
 use bytes ();
+use Devel::Leak::Cb;
+use Dash::Leak;
 our $yaml;
 BEGIN { $yaml = AnyEvent::Queue::Encoder::YAML->new; }
 
@@ -142,12 +144,12 @@ sub _take {
 	my $self = shift;
 	my %args = @_;
 	my $src = $args{src} || $args{dst} || 'default';
-	::measure('bt take begin');
+	leaksz 'bt take begin';
 	$self->__watch_only($src, sub {
-		::measure('bt watch ok');
+		leaksz 'bt watch ok';
 		if (shift) {
 			$self->__reserve(sub {
-				::measure('bt reserve end');
+				leaksz 'bt reserve end';
 				$args{cb}->(@_);
 			});
 		} else {
@@ -457,15 +459,15 @@ sub __put {
 sub __reserve {
 	my $self = shift;
 	my $cb = shift;
-	::measure('bt __reserve begin');
+	leaksz 'bt __reserve begin';
 	$self->{con}->command("reserve-with-timeout 1", cb => sub {
 		defined( local $_ = shift ) or return $cb->(undef,@_);
 		if (/RESERVED (\d+) (\d+)/) {
 			my ($job,$size) = ($1,$2);
-			::measure('bt __reserve ok, reading');
+			leaksz 'bt __reserve ok, reading';
 			$self->{con}->recv($size+2, cb => sub { # +2 means with \r\n
 				my $data = shift;
-				::measure('bt __reserve got data');
+				leaksz 'bt __reserve got data';
 				substr($data,$size) = ''; # truncate trailing garbage
 				#diag "<+ reserved: job $job, data (".length($_[1])."): $_[1]";
 				my $j = {

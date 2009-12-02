@@ -8,6 +8,8 @@ use base 'AnyEvent::Queue::Client';
 use constant DEFPRI => 16;
 use Errno ();
 use AnyEvent::Queue::Encoder::JSON;
+use Devel::Leak::Cb;
+use Dash::Leak;
 our $json;
 BEGIN { $json = AnyEvent::Queue::Encoder::JSON->new; }
 
@@ -83,7 +85,7 @@ sub _add {
 
 sub _recv_job {
 	my $self = shift;
-	::measure('take begin');
+	leaksz 'take begin';
 	my $command = shift;
 	my $src = shift;
 	my %args = @_;
@@ -104,7 +106,7 @@ sub _recv_job {
 						data => $data,
 					});
 				$self->{taken}{$src}{$id}++;
-				::measure('take end');
+				leaksz 'take end';
 				$args{cb}($job);
 				%args = ();
 			});

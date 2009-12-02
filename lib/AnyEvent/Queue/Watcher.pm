@@ -8,8 +8,9 @@ use R::Dump;
 use Time::HiRes qw(time);
 use Scalar::Util qw(weaken isweak);
 
-use AnyEvent::cb;
 use constant::def DEBUG => 0;
+use Devel::Leak::Cb;
+use Dash::Leak;
 
 BEGIN { eval { require Devel::Refcount; *refcount = \&Devel::Refcount::refcount; 1 } or *refcount = sub { -1 }; }
 
@@ -53,7 +54,7 @@ sub reset {
 sub _loop {
 	weaken(my $self = shift);
 	#warn "watcher loop $self->{taking} + $self->{taken}{count} cmp $self->{curfetch}";
-	::measure('watcher loop in');
+	leaksz 'watcher loop in';
 	#weaken(my $x = shift);
 	#$self->_run
 	#weaken($self) unless isweak($self);
@@ -80,28 +81,28 @@ sub _loop {
 		my $cdelay = $delay * ($_ - $self->{taken}{count} - 1);
 		if ($cdelay) {
 			#warn "take after $cdelay";
-			$self->{client}->after( $cdelay, sb {
+			$self->{client}->after( $cdelay, cb {
 				$self or return;
 				return if $self->{taking} + $self->{taken}{count} >= $self->{curfetch};
 				$self->{taking}++;
-				::measure('watcher loop after in 1');
+				leaksz 'watcher loop after in 1';
 				$self->take;
 			});
 		} else {
 			#warn "non-delayed take $self ".refcount($self);
 			$self->{taking}++;
-			::measure('watcher loop after in 2');
+			leaksz 'watcher loop after in 2';
 			$self->take;
 			return;
-			#$self->{client}->after( 0.0000001, sb {
+			#$self->{client}->after( 0.0000001, cb {
 			#	$self or warn("No self"),return;
 			#	$self->{taking}++;
-			#	::measure('watcher loop after in 3');
+			#	::measure('watcher loop after in 3') if ::MEMTEST;
 			#	$self->take;
 			#});
 		}
 	}
-	::measure('watcher loop out');
+	leaksz 'watcher loop out';
 	return;
 	
 }
@@ -119,7 +120,7 @@ sub _next {
 		#warn "rated $self->{rate} take: wait $wait";
 		$self->{taking}++;
 		if ($wait) {
-			$self->{client}->after( $wait, sb {
+			$self->{client}->after( $wait, cb {
 				$self and $self->maybe_take;
 			});
 		} else {
@@ -129,7 +130,7 @@ sub _next {
 	elsif ($self->{delay}) {
 		warn "release with self.delay $self->{delay}";
 		$self->{taking}++;
-		$self->{client}->after( $self->{delay}, sb {
+		$self->{client}->after( $self->{delay}, cb {
 			$self and $self->maybe_take;
 		});
 	}
@@ -149,12 +150,12 @@ sub take {
 	weaken( my $self = shift );
 	weaken( my $client = $self->{client} );
 	#my $self = shift;
-	::measure('watcher take');
+	leaksz 'watcher take';
 	$client->take(
 		src => $self->{source},
 		cb => sub {
 			my ($j,$e) = @_;
-			::measure('watcher taken');
+			leaksz 'watcher taken';
 			#refcount($self) == 1 and warn "Refcnt = 1 object ready to destroy";
 			#warn "_take(@_)";
 			$self->{taking}--;
@@ -185,14 +186,14 @@ sub take {
 					unless ($self->{stopping}) {
 						#warn "(".int($self)." : ".refcount($self).") not stopping, want more after delay ($self->{taking}/$self->{curfetch}).";
 						#warn "no more, delay loop";
-						$self->{client}->after( 0.3, sb {
+						$self->{client}->after( 0.3, cb {
 							$self or return;
 							#warn "delayed loop";
 							$self->_loop;
 						});
 					} else {
 						# check for termination
-						$self->{client}->after( 0.0000001, sb {
+						$self->{client}->after( 0.0000001, cb {
 							$self->_loop;
 						});
 						#$self->_loop;
@@ -200,7 +201,7 @@ sub take {
 					return;
 				} else {
 					warn "Take failed: $err";
-					$self->{client}->after(0.1, sb {
+					$self->{client}->after(0.1, cb {
 						$self->{taking}++;
 						$self->maybe_take;
 					});
@@ -314,7 +315,7 @@ sub _back {
 	weaken( $self->{waitingcb}{int $args{cb}} = $args{cb} ) if $args{cb};
 	$self->{client}->$op(
 		@_,
-		cb => sb {
+		cb => cb {
 			local *__ANON__ = $op.'.cb';
 			$taken->{count}--;
 			delete $taken->{$job->{src}}{$job->{id}};

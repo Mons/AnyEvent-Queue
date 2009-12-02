@@ -24,7 +24,11 @@ use Scalar::Util qw(weaken);
 use Data::Dumper;
 
 use R::Dump;
-use AnyEvent::cb;
+use Devel::Leak::Cb;
+use Dash::Leak;
+
+
+use constant MEMTEST => 0;
 
 =head1 INTERFACE
 
@@ -66,13 +70,13 @@ sub job {
 	my $self = shift;
 	#warn "New job".Dumper(\@_);
 	my $args = shift;
-	::measure('new job');
+	leaksz 'new job';
 	eval {
 		my $data = $self->{encoder}->decode($args->{data});
 		#warn "data = $args->{data} ".Dump($data);
 		$args->{data} = $data;
 	};
-	::measure('new job eval 1');
+	leaksz 'new job eval 1';
 	#warn if $@;
 	if (my $e = $@) {
 		eval {
@@ -80,10 +84,10 @@ sub job {
 			$args->{data} = $data;
 			#warn "default encoder $self->{encoder} failed ($e) but YML succeded";
 		};
-		::measure('new job eval 2');
+		leaksz 'new job eval 2';
 		#warn if $@;
 	}
-	::measure('new job eval end');
+	leaksz 'new job eval end';
 	$self->job_class->new( $args );
 }
 
@@ -136,7 +140,7 @@ sub next_server {
 sub connect {
 	my ($self,%args) = @_;
 	if ($args{cb}) {
-		$self->reg_cb( connected => sb {
+		$self->reg_cb( connected => cb {
 			shift->unreg_me;
 			delete($args{cb})->(@_);
 		} );
@@ -198,7 +202,7 @@ sub watcher {
 	undef $personal;
 	weaken( my $w = $watcher );
 	$watcher->{client}->reg_cb(
-		connected => sb {
+		connected => cb {
 			#shift->unreg_me;
 			$w or return;
 			#warn '('.int($w->{client}).") Personal connected @_";
