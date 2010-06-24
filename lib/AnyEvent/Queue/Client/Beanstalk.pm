@@ -46,6 +46,7 @@ sub new {
 		$me->{state}{watch} = { default => 1 };
 		$me->{state}{use} = 'default';
 	});
+	$self->{delayed_use} = {};
 	$self;
 }
 
@@ -76,9 +77,9 @@ sub _add {
 			return;
 		}
 		$self->__use( $args{dst}, sub {
-			shift or return do{ %args = ();$args{cb}->(undef,@_) };
+			shift or return do{ $args{cb}->(undef,@_),%args = (); };
 			$self->__put($args{data},$args{pri},$args{delay},$args{ttr},sub {
-				my $action = shift or return do{ %args = ();$args{cb}->(undef,@_) };
+				my $action = shift or return do{$args{cb}->(undef,@_),%args = (); };
 				warn "Job was buried" if $action =~ /buried/;
 				my $id = shift;
 				my $job = $self->job({
@@ -89,6 +90,7 @@ sub _add {
 				});
 				$args{cb}->($job);
 				%args = ();
+				$self->__re_use;
 			});
 		});
 	};
@@ -400,11 +402,32 @@ sub __e {
 	}
 }
 
+sub __re_use {
+	my $self = shift;
+	if (%{ $self->{delayed_use} }) {
+		my $cur = $self->{state}{use};
+		if ( exists $self->{delayed_use}{ $cur } ) {
+			#
+		} else {
+			($cur) = keys %{ $self->{delayed_use} };
+		}
+		$self->__use( $cur, shift @{ $self->{delayed_use}{ $cur } } );
+		delete $self->{delayed_use}{ $cur } unless @{ $self->{delayed_use}{ $cur } };
+		return;
+	}
+}
+
 sub __use {
 	my $self = shift;
 	my $dst = shift;
 	my $cb = shift;
 	return $cb->(1) if $self->{state}{use} eq $dst;
+	if ($self->{__in_use}) {
+		push @{ $self->{delayed_use}{$dst} }, $cb;
+		return;
+	}
+	$self->{__in_use} = 1;
+	#warn "\nSwitch use $self->{state}{use} => $dst";
 	$self->{con}->command("use $dst", cb => sub {
 		defined( local $_ = shift ) or return $cb->(undef,@_);
 		if (/USING \Q$dst\E/) {
@@ -414,6 +437,7 @@ sub __use {
 		else {
 			$self->__e($cb);
 		}
+		$self->{__in_use} = 0;
 	});
 }
 
@@ -422,7 +446,7 @@ sub __use {
 sub __put {
 	my $self = shift;
 	my $cb = pop;
-	my ($data,$pri,$delay,$ttr) = @_;
+	my ($data,$pri,$delay,$ttr,$rev) = @_;
 	$pri = DEFPRI unless defined $pri;
 	$pri = ( $pri ) % (2**32);
 	# warn "put $data,$pri,$delay,$ttr";

@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use Test::More tests => 5;
 use Encode;
-use ex::lib qw(../../lib);
+use lib::abs qw(../../lib);
 
 use_ok 'AnyEvent::Queue::Encoder::Gzip';
 

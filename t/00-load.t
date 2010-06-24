@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use Test::More;
 use Module::Find;
-use ex::lib qw(../lib);
+use lib::abs qw(../lib);
 
 setmoduledirs( $INC[0] );
 my @modules = grep { !/^$/ } findallmod 'AnyEvent';

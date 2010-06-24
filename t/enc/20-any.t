@@ -5,7 +5,7 @@ use warnings;
 use Test::More tests => 14;
 use Encode;
 use Data::Dumper;
-use ex::lib qw(../../lib);
+use lib::abs qw(../../lib);
 $Data::Dumper::Useqq=1;
 
 use_ok 'AnyEvent::Queue::Encoder::JSON';
