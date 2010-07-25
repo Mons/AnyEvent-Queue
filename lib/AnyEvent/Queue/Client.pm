@@ -23,7 +23,6 @@ use Sub::Name;
 use Scalar::Util qw(weaken);
 use Data::Dumper;
 
-use R::Dump;
 use Devel::Leak::Cb;
 use Dash::Leak;
 

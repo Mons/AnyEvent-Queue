@@ -4,7 +4,6 @@ use strict;
 use base 'Object::Event';
 use Data::Dumper;
 use Carp;
-use R::Dump;
 use Time::HiRes qw(time);
 use Scalar::Util qw(weaken isweak);
 
