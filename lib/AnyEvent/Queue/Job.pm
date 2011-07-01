@@ -21,4 +21,7 @@ sub new {
 	$self;
 }
 
+sub DESTROY {
+}
+
 1;
